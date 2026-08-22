@@ -1,30 +1,30 @@
-# IPO Scout India — Fixed v3
+# IPO Scout India — v2 parser fix
 
-This update removes the problematic InvestorGain scraper completely and uses only the structured IPOMarkets IPO table.
+This version fixes the issue where status text such as **"Opens in 2d"** was incorrectly displayed as the IPO company name.
 
-## Fixed
-- No more fake company names such as `How GMP Works...`
-- No duplicate cards from multiple sources
-- GMP is parsed only from the GMP column
-- Price band is parsed only from the price-band column
-- Status is parsed only from the status column
-- Company name comes from the IPO logo `alt` text / company link
-- The top recommendation is selected only from IPOs that are currently OPEN
+## What changed
+- Company names are now extracted from the IPO detail link in each table row.
+- Status cells such as `Closes in 2d` and `Opens in 3d` are parsed separately.
+- Added frontend validation so status text can never be rendered as a company name.
+- IPOMarkets remains the primary public source.
+- InvestorGain remains a fallback.
+- No API key is required.
 
-## Replace only these files in GitHub
+## Upload these files to GitHub
+Replace:
 - `api/ipos.js`
 - `src/main.jsx`
 
-After committing, Vercel should redeploy automatically.
+You may upload the full project if that's easier.
 
-Then test:
+After the GitHub commit, Vercel should automatically redeploy.
+
+## Test
+Open:
 https://ipo-scout-india.vercel.app/api/ipos
 
-Each object should have a real company name and sensible GMP, for example:
-- name: `Technocrats Plasma Systems`
-- gmp: `30`
-- gmpPercentage: `22.73`
+Each item should contain a real `"name"` such as:
+- `"Tempsens Instruments (India)"`
+- `"Augmont Enterprises"`
 
-No API key is required.
-
-GMP is unofficial and may change rapidly.
+Then open the main dashboard.
