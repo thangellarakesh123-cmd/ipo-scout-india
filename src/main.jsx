@@ -70,7 +70,7 @@ function App(){
     try{
       const result = await fetchIPOData();
       setIpos(result.data);
-      setMessage(`Live data · ${result.provider || "IPO provider"}${result.cached ? " · cached" : ""}`);
+      setMessage(`Live public data · ${result.count || result.data.length} IPOs · no API key`);
       setLastUpdated(new Date(result.fetchedAt || Date.now()));
     }catch(e){
       setIpos(DEMO_IPOS);
@@ -140,8 +140,8 @@ function App(){
           <div><span>Price Band</span><b>₹{ipo.priceMin || "—"}–₹{ipo.priceMax || "—"}</b></div>
           <div><span>GMP</span><b>{formatINR(ipo.gmp)}</b></div>
           <div><span>Total Sub.</span><b>{formatX(ipo.subscription.total)}</b></div>
-          <div><span>QIB</span><b>{formatX(ipo.subscription.qib)}</b></div>
-          <div><span>Retail</span><b>{formatX(ipo.subscription.retail)}</b></div>
+          <div><span>GMP %</span><b>{num(ipo.gmpPercentage).toFixed(2)}%</b></div>
+          <div><span>Source</span><b>{ipo.source || "Public web"}</b></div>
           <div><span>Risk</span><b>{risk(ipo)}</b></div>
         </div>
         <div className="card-foot">
@@ -153,7 +153,7 @@ function App(){
 
     <section className="logic">
       <h2>Ranking Logic</h2>
-      <p><b>35%</b> GMP strength · <b>30%</b> total subscription · <b>20%</b> QIB demand · <b>10%</b> issue-size/risk signal · <b>5%</b> board quality.</p>
+      <p><b>50%</b> GMP strength · <b>35%</b> total subscription · <b>15%</b> Mainboard/SME risk adjustment. Free public-source data only; no API key required.</p>
       <p>Score 80+ Strong Apply · 65–79 Apply · 50–64 Wait · below 50 Avoid.</p>
     </section>
   </main>

@@ -1,53 +1,50 @@
-# IPO Scout India — Secure Live Data Version
+# IPO Scout India — Free Public Sources Version
 
-This version routes live IPO requests through a Vercel Serverless Function so the API key stays server-side.
+This build does **not require any API key**.
 
-## Repository structure
+It uses a Vercel serverless function (`api/ipos.js`) to read publicly accessible IPO tracking pages and extract:
+- Open/upcoming IPOs
+- GMP / GMP %
+- Total subscription when available
+- Price band
+- Dates
+- Mainboard vs SME
 
-```text
-ipo-scout-india/
-├── api/
-│   └── ipos.js
-├── src/
-│   ├── main.jsx
-│   └── styles.css
-├── .env.example
-├── .gitignore
-├── index.html
-├── package.json
-├── README.md
-└── vercel.json
-```
+Primary sources:
+- InvestorGain: https://investorgain.in/
+- IPOMarkets: https://ipomarkets.com/
 
-## Vercel environment variables
+The dashboard refreshes manually with the Refresh button and automatically every 5 minutes.
 
-In Vercel → Project → Settings → Environment Variables, remove old `VITE_IPO_*` variables and add:
+## Ranking
+Because free public pages do not always expose QIB/Retail category splits consistently, the score is:
+- 50% GMP strength
+- 35% total subscription
+- 15% Mainboard/SME risk adjustment
 
-```text
-IPO_PROVIDER=ipoguru
-IPO_API_KEY=YOUR_REAL_IPO_GURU_API_KEY
-```
+## GitHub files
+Upload/replace:
+- `api/ipos.js`
+- `src/main.jsx`
+- `src/styles.css`
+- `package.json`
+- `.env.example`
+- `README.md`
+- `vercel.json`
 
-Then redeploy.
+## Vercel
+No Environment Variables are needed.
 
-## Test after deployment
+After committing to GitHub, Vercel should redeploy automatically. If not:
+Deployments → latest → Redeploy.
 
-Open:
+Test:
+`https://ipo-scout-india.vercel.app/api/ipos`
 
-```text
-https://YOUR-SITE.vercel.app/api/ipos
-```
+Successful response starts with:
+`{"ok":true,...}`
 
-A working setup returns JSON with `"ok": true` and a `data` array.
+## Important
+This uses public webpage scraping, not an official API. It may break if a source changes its HTML or blocks automated requests. The server uses two sources so one can act as a fallback.
 
-If you get HTTP 401/403, the provider rejected the key. Confirm the key is active and copied without spaces, then redeploy.
-
-Official IPO Guru API docs: https://www.ipoguru.in/ipo-gmp-details-developer-api
-
-## Security
-
-Do not upload `.env` to GitHub. `.gitignore` excludes it.
-
-## Disclaimer
-
-The ranking is informational and algorithmic, not investment advice. GMP is unofficial and does not guarantee listing gains.
+GMP is unofficial and is not a guarantee of listing gains. The ranking is informational, not financial advice.
