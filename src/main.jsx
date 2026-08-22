@@ -81,10 +81,31 @@ function App(){
 
   useEffect(()=>{ refresh(); const id=setInterval(refresh, 5*60*1000); return ()=>clearInterval(id); },[]);
 
-  const ranked = useMemo(()=>ipos
-    .filter(i => i.name && !/^(opens|closes|open|upcoming)\b/i.test(i.name))
-    .map(i=>({...i, score:scoreIPO(i)}))
-    .sort((a,b)=>b.score-a.score),[ipos]);
+  const ranked = useMemo(()=>{
+    const cleanName = (name="") => String(name).replace(/\s+/g," ").trim();
+    const keyOf = (name="") => cleanName(name)
+      .toLowerCase()
+      .replace(/\b(limited|ltd|india|private|pvt|ipo|mainboard|sme)\b/g," ")
+      .replace(/[^a-z0-9]/g,"");
+
+    const bad = (name="") =>
+      !cleanName(name) ||
+      /How GMP Works|Refresh cycle|IPOs tracked|Open right now/i.test(name) ||
+      /^(opens?|closes?|open|upcoming|listed|allotted|view all)/i.test(cleanName(name));
+
+    const map = new Map();
+    for(const i of ipos){
+      if(bad(i.name)) continue;
+      const key = keyOf(i.name);
+      if(!key) continue;
+      const scored = {...i, score:scoreIPO(i)};
+      const old = map.get(key);
+      if(!old || scored.source === "IPOMarkets" || scored.score > old.score){
+        map.set(key, scored);
+      }
+    }
+    return [...map.values()].sort((a,b)=>b.score-a.score);
+  },[ipos]);
   const open = ranked.filter(i=>i.status==="open");
   const best = open[0] || ranked[0];
   const filtered = ranked.filter(i => {

@@ -207,17 +207,79 @@ async function fetchPage(url){
   } finally { clearTimeout(timer); }
 }
 
+function normalizeCompanyKey(name){
+  return clean(name)
+    .toLowerCase()
+    .replace(/(limited|ltd|india|private|pvt|ipo|mainboard|sme)/g," ")
+    .replace(/[^a-z0-9]/g,"")
+    .trim();
+}
+
+function isGarbageName(name){
+  const t = clean(name);
+  if(!t) return true;
+  if(t.length < 3 || t.length > 120) return true;
+  if(/How GMP Works|Refresh cycle|IPOs tracked|Open right now/i.test(t)) return true;
+  if(/^(opens?|closes?|open|upcoming|listed|allotted|view all)/i.test(t)) return true;
+  return false;
+}
+
+function scoreRecord(x){
+  let s = 0;
+  if(x.source === "IPOMarkets") s += 10;
+  if(x.priceMax > 0) s += 3;
+  if(x.gmp > 0) s += 3;
+  if(x.gmpPercentage > 0) s += 2;
+  if(x.subscription?.total > 0) s += 3;
+  if(x.closeDate) s += 1;
+  return s;
+}
+
+function mergeRecords(a,b){
+  const aScore = scoreRecord(a);
+  const bScore = scoreRecord(b);
+  const primary = aScore >= bScore ? {...a} : {...b};
+  const other = aScore >= bScore ? b : a;
+
+  primary.priceMin = primary.priceMin || other.priceMin || 0;
+  primary.priceMax = primary.priceMax || other.priceMax || 0;
+  primary.gmp = primary.gmp || other.gmp || 0;
+  primary.gmpPercentage = primary.gmpPercentage || other.gmpPercentage || 0;
+  primary.lotSize = primary.lotSize || other.lotSize || 0;
+  primary.issueSize = primary.issueSize || other.issueSize || 0;
+  primary.openDate = primary.openDate || other.openDate || "";
+  primary.closeDate = primary.closeDate || other.closeDate || "";
+  primary.subscription = {
+    qib: primary.subscription?.qib || other.subscription?.qib || 0,
+    nii: primary.subscription?.nii || other.subscription?.nii || 0,
+    retail: primary.subscription?.retail || other.subscription?.retail || 0,
+    total: primary.subscription?.total || other.subscription?.total || 0
+  };
+  return primary;
+}
+
 function dedupe(items){
   const map = new Map();
+
   for(const x of items){
-    const key = x.name.toLowerCase().replace(/[^a-z0-9]/g,"");
-    if(!key || /^(opens|closes|open|upcoming)/.test(key)) continue;
-    const old = map.get(key);
-    // Prefer richer record (subscription + GMP + price).
-    const richness = Number(x.subscription.total>0)+Number(x.gmp>0)+Number(x.priceMax>0);
-    const oldRichness = old ? Number(old.subscription.total>0)+Number(old.gmp>0)+Number(old.priceMax>0) : -1;
-    if(!old || richness > oldRichness) map.set(key,x);
+    if(isGarbageName(x.name)) continue;
+
+    const key = normalizeCompanyKey(x.name);
+    if(!key) continue;
+
+    const issuePrice = Number(x.priceMax || x.priceMin || 0);
+    if(issuePrice > 0 && x.gmpPercentage > 0){
+      const implied = issuePrice * x.gmpPercentage / 100;
+      if(x.gmp > issuePrice * 3 || x.gmp > implied * 4){
+        x.gmp = Math.round(implied * 100) / 100;
+      }
+    }
+
+    const existing = map.get(key);
+    if(!existing) map.set(key,x);
+    else map.set(key, mergeRecords(existing,x));
   }
+
   return [...map.values()];
 }
 
@@ -239,6 +301,7 @@ export default async function handler(req,res){
 
   collected=dedupe(collected)
     .filter(x=>x.name && x.name.length>2)
+    .filter(x=>!isGarbageName(x.name))
     .filter(x=>x.status==="open" || x.status==="upcoming");
 
   if(!collected.length){

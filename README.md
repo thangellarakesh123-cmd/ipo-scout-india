@@ -1,30 +1,22 @@
-# IPO Scout India — v2 parser fix
+# IPO Scout India — Working Live Version + Dedup Fix
 
-This version fixes the issue where status text such as **"Opens in 2d"** was incorrectly displayed as the IPO company name.
+This version keeps the earlier working live-data logic and only fixes the bad duplicate cards.
 
-## What changed
-- Company names are now extracted from the IPO detail link in each table row.
-- Status cells such as `Closes in 2d` and `Opens in 3d` are parsed separately.
-- Added frontend validation so status text can never be rendered as a company name.
-- IPOMarkets remains the primary public source.
-- InvestorGain remains a fallback.
-- No API key is required.
+## Fixed
+- Removes junk cards such as `How GMP Works ... Tempsens Instruments (India)`
+- Deduplicates the same IPO across InvestorGain and IPOMarkets
+- Prefers the cleaner IPOMarkets record when both sources contain the same IPO
+- Fills missing fields from the alternate source where useful
+- Adds a sanity check for impossible GMP values
+- Keeps the same public/free data sources and no API key requirement
 
-## Upload these files to GitHub
-Replace:
+## Replace only these files in GitHub
 - `api/ipos.js`
 - `src/main.jsx`
 
-You may upload the full project if that's easier.
+After committing, let Vercel redeploy automatically.
 
-After the GitHub commit, Vercel should automatically redeploy.
-
-## Test
-Open:
+Then test:
 https://ipo-scout-india.vercel.app/api/ipos
 
-Each item should contain a real `"name"` such as:
-- `"Tempsens Instruments (India)"`
-- `"Augmont Enterprises"`
-
-Then open the main dashboard.
+You should see each IPO only once.
