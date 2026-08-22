@@ -1,0 +1,8 @@
+{
+  "framework": "vite",
+  "functions": {
+    "api/ipos.js": {
+      "maxDuration": 10
+    }
+  }
+}

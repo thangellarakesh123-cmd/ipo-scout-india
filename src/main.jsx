@@ -44,67 +44,18 @@ function risk(ipo){
 }
 
 async function fetchIPOData(){
-  const apiKey = import.meta.env.VITE_IPO_API_KEY;
-  const provider = import.meta.env.VITE_IPO_PROVIDER || "ipoguru";
-  if(!apiKey) return {data: DEMO_IPOS, mode:"demo", message:"API key not configured — showing demo data."};
-
-  if(provider === "ipoguru"){
-    const base = import.meta.env.VITE_IPO_API_URL || "https://www.ipoguru.in/api/v1";
-    const headers = {"X-API-KEY": apiKey};
-    const [open, upcoming] = await Promise.all([
-      fetch(`${base}/ipos?status=open`, {headers}),
-      fetch(`${base}/ipos?status=upcoming`, {headers})
-    ]);
-    if(!open.ok) throw new Error(`API request failed: ${open.status}`);
-    const a = await open.json();
-    const b = upcoming.ok ? await upcoming.json() : {data:[]};
-    return {data:[...(a.data||[]), ...(b.data||[])].map(normalizeIPO), mode:"live", message:"Live API data"};
+  const response = await fetch(`/api/ipos?t=${Date.now()}`, {cache:"no-store"});
+  let payload = {};
+  try { payload = await response.json(); } catch {}
+  if(!response.ok){
+    throw new Error(payload?.message || `Server returned ${response.status}`);
   }
-
-  if(provider === "iponotify"){
-    const base = import.meta.env.VITE_IPO_API_URL || "https://iponotify.me/api/ipo";
-    const headers = {"X-API-KEY": apiKey};
-    const [open, upcoming] = await Promise.all([
-      fetch(`${base}/open?limit=100`, {headers}),
-      fetch(`${base}/upcoming?limit=100`, {headers})
-    ]);
-    if(!open.ok) throw new Error(`API request failed: ${open.status}`);
-    const a = await open.json();
-    const b = upcoming.ok ? await upcoming.json() : {data:[]};
-    return {data:[...(a.data||[]), ...(b.data||[])].map(normalizeIPO), mode:"live", message:"Live API data"};
+  if(!Array.isArray(payload.data) || payload.data.length === 0){
+    throw new Error("No IPO records returned by the live provider.");
   }
-
-  throw new Error("Unsupported IPO provider");
+  return payload;
 }
 
-function normalizeIPO(x){
-  const pb = String(x.priceBand || x.price_band || "");
-  const prices = pb.match(/[\d.]+/g)?.map(Number) || [];
-  const sub = x.subscription || {};
-  const g = x.gmp || {};
-  return {
-    id: x.id || x.slug || x.symbol || x.company || x.name,
-    name: x.company || x.name || "Unnamed IPO",
-    symbol: x.symbol || "",
-    type: (x.type || x.issue_type || x.board || "mainboard").toLowerCase().includes("sme") ? "sme" : "mainboard",
-    status: String(x.status || "open").toLowerCase(),
-    sector: x.sector || x.industry || "—",
-    priceMin: num(x.price_min ?? x.minimum_price ?? prices[0]),
-    priceMax: num(x.price_max ?? x.maximum_price ?? prices.at(-1)),
-    lotSize: num(x.lot_size ?? x.lotSize),
-    issueSize: num(x.issue_size ?? x.issueSize),
-    openDate: x.open_date || x.openDate || x.bidding_start_date || "",
-    closeDate: x.close_date || x.closeDate || x.bidding_end_date || "",
-    gmp: num(g.amount ?? g.value ?? x.gmp_amount ?? x.gmp),
-    subscription:{
-      qib:num(sub.qib ?? sub.QIB ?? x.qib_subscription),
-      nii:num(sub.nii ?? sub.NII ?? x.nii_subscription),
-      retail:num(sub.retail ?? sub.rii ?? sub.RII ?? x.retail_subscription),
-      total:num(sub.total ?? x.total_subscription)
-    },
-    source:"Live API"
-  };
-}
 
 function App(){
   const [ipos,setIpos] = useState(DEMO_IPOS);
@@ -118,9 +69,9 @@ function App(){
     setLoading(true);
     try{
       const result = await fetchIPOData();
-      setIpos(result.data.length ? result.data : DEMO_IPOS);
-      setMessage(result.message);
-      setLastUpdated(new Date());
+      setIpos(result.data);
+      setMessage(`Live data · ${result.provider || "IPO provider"}${result.cached ? " · cached" : ""}`);
+      setLastUpdated(new Date(result.fetchedAt || Date.now()));
     }catch(e){
       setIpos(DEMO_IPOS);
       setMessage(`Live refresh failed — demo data shown. ${e.message}`);
