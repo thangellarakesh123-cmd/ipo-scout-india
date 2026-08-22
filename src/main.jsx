@@ -86,7 +86,7 @@ function App(){
     .map(i=>({...i, score:scoreIPO(i)}))
     .sort((a,b)=>b.score-a.score),[ipos]);
   const open = ranked.filter(i=>i.status==="open");
-  const best = open[0] || ranked[0];
+  const best = open[0] || null;
   const filtered = ranked.filter(i => {
     const board = filter==="all" || i.type===filter;
     const status = filter==="open" ? i.status==="open" : board;
@@ -113,9 +113,10 @@ function App(){
       <div><b>{best ? recommendation(best.score,best) : "—"}</b><span>Top Recommendation</span></div>
     </section>
 
+    {!best && <section className="hero-card"><div><p className="eyebrow">NO IPO CURRENTLY OPEN</p><h2>Nothing available to apply right now</h2><p>Upcoming IPOs are listed below. The dashboard will rank them once bidding opens.</p></div></section>}
     {best && <section className="hero-card">
       <div>
-        <p className="eyebrow">BEST IPO TO WATCH / APPLY</p>
+        <p className="eyebrow">BEST OPEN IPO TO APPLY</p>
         <h2>{best.name}</h2>
         <p>{best.sector} · {best.type === "sme" ? "SME" : "Mainboard"} · {best.symbol}</p>
         <div className="chips"><span>{recommendation(best.score,best)}</span><span>Risk: {risk(best)}</span><span>GMP: {formatINR(best.gmp)}</span></div>
