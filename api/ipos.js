@@ -2,16 +2,8 @@
 import * as cheerio from "cheerio";
 
 const SOURCES = [
-  {
-    name: "InvestorGain",
-    url: "https://investorgain.in/",
-    parser: parseInvestorGain
-  },
-  {
-    name: "IPOMarkets",
-    url: "https://ipomarkets.com/",
-    parser: parseIPOMarkets
-  }
+  { name: "IPOMarkets", url: "https://ipomarkets.com/", parser: parseIPOMarkets },
+  { name: "InvestorGain", url: "https://investorgain.in/", parser: parseInvestorGain }
 ];
 
 function clean(s=""){ return String(s).replace(/\s+/g," ").trim(); }
@@ -23,19 +15,18 @@ function money(v){ return n(String(v).replace(/[₹+]/g,"")); }
 
 function statusFromText(t){
   t = clean(t).toLowerCase();
-  if(t.includes("upcoming")) return "upcoming";
-  if(t.includes("open") || t.includes("closes today") || t.includes("closes tomorrow")) return "open";
-  if(t.includes("closed") || t.includes("allotment")) return "closed";
+  if(t.includes("opens in") || t.includes("upcoming")) return "upcoming";
+  if(t.includes("closes in") || t.includes("open") || t.includes("closes today") || t.includes("closes tomorrow")) return "open";
+  if(t.includes("allotted") || t.includes("allotment") || t.includes("closed") || t.includes("listed")) return "closed";
   return "";
 }
 
 function boardFromText(t){
-  t = clean(t).toLowerCase();
-  return t.includes("sme") ? "sme" : "mainboard";
+  return clean(t).toLowerCase().includes("sme") ? "sme" : "mainboard";
 }
 
 function parsePercent(text){
-  const m = clean(text).match(/(-?\d+(?:\.\d+)?)\s*%/);
+  const m = clean(text).match(/([+-]?\d+(?:\.\d+)?)\s*%/);
   return m ? Number(m[1]) : 0;
 }
 
@@ -47,89 +38,31 @@ function parseSubscription(text){
 function parsePriceBand(text){
   const vals = clean(text).replace(/,/g,"").match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
   if(!vals.length) return [0,0];
-  if(vals.length === 1) return [vals[0], vals[0]];
-  return [Math.min(...vals.slice(0,2)), Math.max(...vals.slice(0,2))];
+  if(vals.length === 1) return [vals[0],vals[0]];
+  return [vals[0], vals[1]];
 }
 
-function parseDates(text){
-  const parts = clean(text).split(/[–—-]/).map(x=>x.trim()).filter(Boolean);
-  return {openDate: parts[0] || "", closeDate: parts[1] || ""};
+function parseDateRange(text){
+  const t = clean(text);
+  const m = t.match(/(.+?)\s+[–—-]\s+(.+)/);
+  return m ? {openDate:clean(m[1]), closeDate:clean(m[2])} : {openDate:"",closeDate:t};
 }
 
-function parseInvestorGain(html){
-  const $ = cheerio.load(html);
-  const items = [];
-
-  $("table tr").each((idx, tr) => {
-    const cells = $(tr).find("td").map((_,td)=>clean($(td).text())).get();
-    if(cells.length < 7) return;
-
-    const joined = cells.join(" | ");
-    const st = statusFromText(joined);
-    if(!st || st === "closed") return;
-
-    const first = cells[0];
-    const name = clean(first.replace(/Mainboard|BSE SME|NSE SME|SME|NSE\s*\/\s*BSE/gi,""));
-    if(!name || /IPO Name/i.test(name)) return;
-
-    const gmpCell = cells[1] || "";
-    const subCell = cells[3] || "";
-    const issuePrice = money(cells[4] || "");
-    const lot = n(cells[5] || "");
-    const size = n(cells[6] || "");
-    const statusText = cells[7] || joined;
-    const dates = parseDates(cells[8] || "");
-
-    items.push({
-      id:`ig-${name.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`,
-      name,
-      symbol:"",
-      type: boardFromText(first),
-      status: statusFromText(statusText) || st,
-      sector:"—",
-      exchange:first.toLowerCase().includes("bse") ? "BSE" : first.toLowerCase().includes("nse") ? "NSE" : "NSE/BSE",
-      priceMin:issuePrice,
-      priceMax:issuePrice,
-      lotSize:lot,
-      issueSize:size,
-      openDate:dates.openDate,
-      closeDate:dates.closeDate,
-      gmp:money(gmpCell),
-      gmpPercentage:parsePercent(gmpCell),
-      subscription:{qib:0,nii:0,retail:0,total:parseSubscription(subCell)},
-      source:"InvestorGain"
-    });
-  });
-
-  // Fallback: InvestorGain's hero card often contains the current top open IPO even
-  // if the table is rendered in a way Cheerio cannot see.
-  if(!items.length){
-    const body = clean($("body").text());
-    const hero = body.match(/([A-Za-z0-9&().,' -]{3,80})\s+MAINBOARD[^₹]*₹\s*(\d+(?:\.\d+)?)\s+▲?\s*(\d+(?:\.\d+)?)%[^L]*Lot Size\s*(\d+)[^S]*Subscription\s*(\d+(?:\.\d+)?)x[^C]*Closes\s*([A-Za-z0-9 ]{3,20})/i);
-    if(hero){
-      const issueMatch = body.match(/Expected listing:\s*₹\s*(\d+(?:\.\d+)?)\s*issue/i);
-      items.push({
-        id:"ig-hero",
-        name:clean(hero[1]),
-        symbol:"",
-        type:"mainboard",
-        status:"open",
-        sector:"—",
-        exchange:"NSE/BSE",
-        priceMin:issueMatch ? Number(issueMatch[1]) : 0,
-        priceMax:issueMatch ? Number(issueMatch[1]) : 0,
-        lotSize:Number(hero[4]),
-        issueSize:0,
-        openDate:"",
-        closeDate:clean(hero[6]),
-        gmp:Number(hero[2]),
-        gmpPercentage:Number(hero[3]),
-        subscription:{qib:0,nii:0,retail:0,total:Number(hero[5])},
-        source:"InvestorGain"
-      });
+function companyFromRow($, tr){
+  // Use the actual IPO detail link, not the first <td>. Responsive tables can
+  // put the status cell before the company cell in DOM order.
+  const anchors = $(tr).find("a").toArray();
+  for(const a of anchors){
+    const txt = clean($(a).text());
+    const href = String($(a).attr("href") || "");
+    if(!txt) continue;
+    if(/view all|allotment|gmp trend|logo/i.test(txt)) continue;
+    if(/\/ipo\/|\/ipos\/|ipo-/i.test(href) || txt.length > 3){
+      // reject status-like labels
+      if(!/^(opens|closes|open|upcoming|allotted|listed|view)/i.test(txt)) return txt;
     }
   }
-  return items;
+  return "";
 }
 
 function parseIPOMarkets(html){
@@ -137,34 +70,36 @@ function parseIPOMarkets(html){
   const items = [];
 
   $("table tr").each((idx,tr)=>{
-    const cells = $(tr).find("td").map((_,td)=>clean($(td).text())).get();
-    if(cells.length < 5) return;
-
-    const joined = cells.join(" | ");
+    const rawCells = $(tr).find("th,td").map((_,td)=>clean($(td).text())).get();
+    const joined = rawCells.join(" | ");
     const status = statusFromText(joined);
-    if(!status || status === "closed") return;
+    if(status !== "open" && status !== "upcoming") return;
 
-    const nameCell = cells[0] || "";
-    const name = clean(nameCell.replace(/Mainboard|SME/gi,""));
-    if(!name) return;
+    const company = companyFromRow($, tr);
+    if(!company) return;
 
-    const bandCell = cells.find(x=>x.includes("₹") && (x.includes("–") || x.includes("-"))) || cells[2] || "";
+    // IPOMarkets visible columns:
+    // Company | Status | Band / Price | GMP | Sub | Dates | Listing
+    const statusCell = rawCells.find(x => /closes|opens|upcoming|open/i.test(x)) || "";
+    const bandCell = rawCells.find(x => /₹\s*\d+\s*[–—-]\s*₹?\s*\d+/.test(x)) || "";
+    const gmpCell = rawCells.find(x => /₹/.test(x) && /%/.test(x)) || "";
+    const subCell = rawCells.find(x => /\d+(?:\.\d+)?\s*[x×]/i.test(x)) || "";
+    const dateCell = rawCells.find(x => /\d{1,2}\s+[A-Za-z]{3}\s+20\d{2}\s*[–—-]\s*\d{1,2}\s+[A-Za-z]{3}\s+20\d{2}/.test(x)) || "";
+
     const [priceMin,priceMax] = parsePriceBand(bandCell);
-    const gmpCell = cells.find((x,i)=>i>1 && /₹/.test(x) && /%/.test(x)) || cells[3] || "";
-    const subCell = cells.find(x=>/[x×]/i.test(x)) || cells[4] || "";
-    const dateCell = cells.find(x=>/\d{1,2}\s+[A-Za-z]{3}\s+20\d{2}/.test(x)) || cells[5] || "";
-    const dates = parseDates(dateCell);
+    const dates = parseDateRange(dateCell);
+    const boardText = clean($(tr).text());
 
     items.push({
-      id:`ipom-${name.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`,
-      name,
+      id:`ipom-${company.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`,
+      name:company,
       symbol:"",
-      type:boardFromText(nameCell),
+      type:boardFromText(boardText),
       status,
+      statusLabel:statusCell,
       sector:"—",
       exchange:"NSE/BSE",
-      priceMin,
-      priceMax,
+      priceMin, priceMax,
       lotSize:0,
       issueSize:0,
       openDate:dates.openDate,
@@ -179,60 +114,137 @@ function parseIPOMarkets(html){
   return items;
 }
 
+function parseInvestorGain(html){
+  const $ = cheerio.load(html);
+  const items = [];
+
+  // First parse any server-rendered table rows.
+  $("table tr").each((idx,tr)=>{
+    const cells = $(tr).find("th,td").map((_,td)=>clean($(td).text())).get();
+    const joined = cells.join(" | ");
+    const status = statusFromText(joined);
+    if(status !== "open" && status !== "upcoming") return;
+
+    const company = companyFromRow($,tr);
+    if(!company) return;
+
+    const gmpCell = cells.find(x=>/₹/.test(x) && /%/.test(x)) || cells.find(x=>/^₹/.test(x)) || "";
+    const subCell = cells.find(x=>/\d+(?:\.\d+)?\s*[x×]/i.test(x)) || "";
+    const issuePriceCell = cells.find((x,i)=>i>0 && /^₹?\d+(?:\.\d+)?$/.test(x)) || "";
+    const lotCell = cells.find(x=>/lot/i.test(x)) || "";
+    const dateCell = cells.find(x=>/\d{1,2}\s+[A-Za-z]{3}/.test(x)) || "";
+
+    const issuePrice = money(issuePriceCell);
+    items.push({
+      id:`ig-${company.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`,
+      name:company,
+      symbol:"",
+      type:boardFromText(joined),
+      status,
+      sector:"—",
+      exchange:/nse/i.test(joined) ? "NSE" : /bse/i.test(joined) ? "BSE" : "NSE/BSE",
+      priceMin:issuePrice,
+      priceMax:issuePrice,
+      lotSize:n(lotCell),
+      issueSize:0,
+      openDate:"",
+      closeDate:dateCell,
+      gmp:money(gmpCell),
+      gmpPercentage:parsePercent(gmpCell),
+      subscription:{qib:0,nii:0,retail:0,total:parseSubscription(subCell)},
+      source:"InvestorGain"
+    });
+  });
+
+  // InvestorGain homepage also has a server-rendered "Right Now" hero.
+  // Parse it as a fallback. Example:
+  // Tempsens Instruments (India) MAINBOARD ... OPEN ₹270 ▲ 90.00%
+  // Expected listing: ₹300 issue + ₹270 GMP ... Lot Size 50 Subscription 5.95x Closes 24 Aug
+  if(!items.some(x=>x.status==="open")){
+    const body = clean($("body").text());
+    const hero = body.match(
+      /([A-Za-z0-9&().,'’ -]{3,100})\s+(MAINBOARD|SME)[^₹]{0,120}?OPEN[^₹]{0,40}?₹\s*(\d+(?:\.\d+)?)\s*[▲+]?[\s(]*(\d+(?:\.\d+)?)%[^]{0,180}?Expected listing:\s*₹\s*(\d+(?:\.\d+)?)\s*issue\s*\+\s*₹\s*\d+(?:\.\d+)?\s*GMP[^]{0,160}?Lot Size\s*(\d+)[^]{0,120}?Subscription\s*(\d+(?:\.\d+)?)x[^]{0,120}?Closes\s*([0-9]{1,2}\s+[A-Za-z]{3})/i
+    );
+    if(hero){
+      items.push({
+        id:`ig-hero-${clean(hero[1]).toLowerCase().replace(/[^a-z0-9]+/g,"-")}`,
+        name:clean(hero[1]),
+        symbol:"",
+        type:hero[2].toLowerCase()==="sme" ? "sme" : "mainboard",
+        status:"open",
+        sector:"—",
+        exchange:"NSE/BSE",
+        priceMin:Number(hero[5]),
+        priceMax:Number(hero[5]),
+        lotSize:Number(hero[6]),
+        issueSize:0,
+        openDate:"",
+        closeDate:clean(hero[8]),
+        gmp:Number(hero[3]),
+        gmpPercentage:Number(hero[4]),
+        subscription:{qib:0,nii:0,retail:0,total:Number(hero[7])},
+        source:"InvestorGain"
+      });
+    }
+  }
+
+  return items;
+}
+
 async function fetchPage(url){
   const ctl = new AbortController();
-  const timer = setTimeout(()=>ctl.abort(), 8000);
+  const timer = setTimeout(()=>ctl.abort(),8000);
   try{
     const r = await fetch(url,{
       signal:ctl.signal,
       headers:{
-        "User-Agent":"Mozilla/5.0 (compatible; IPOScoutIndia/2.0; +https://ipo-scout-india.vercel.app)",
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
         "Accept":"text/html,application/xhtml+xml"
       }
     });
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.text();
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
 
 function dedupe(items){
   const map = new Map();
   for(const x of items){
     const key = x.name.toLowerCase().replace(/[^a-z0-9]/g,"");
-    if(!key) continue;
+    if(!key || /^(opens|closes|open|upcoming)/.test(key)) continue;
     const old = map.get(key);
-    if(!old || (x.subscription.total + x.gmpPercentage) > (old.subscription.total + old.gmpPercentage)){
-      map.set(key,x);
-    }
+    // Prefer richer record (subscription + GMP + price).
+    const richness = Number(x.subscription.total>0)+Number(x.gmp>0)+Number(x.priceMax>0);
+    const oldRichness = old ? Number(old.subscription.total>0)+Number(old.gmp>0)+Number(old.priceMax>0) : -1;
+    if(!old || richness > oldRichness) map.set(key,x);
   }
   return [...map.values()];
 }
 
 export default async function handler(req,res){
-  res.setHeader("Cache-Control","s-maxage=120, stale-while-revalidate=600");
-
-  const errors = [];
-  let collected = [];
+  res.setHeader("Cache-Control","s-maxage=60, stale-while-revalidate=300");
+  const errors=[];
+  let collected=[];
 
   for(const source of SOURCES){
     try{
-      const html = await fetchPage(source.url);
-      const rows = source.parser(html);
-      if(rows.length) collected.push(...rows);
-      else errors.push(`${source.name}: no parseable IPO rows`);
+      const html=await fetchPage(source.url);
+      const rows=source.parser(html);
+      collected.push(...rows);
+      if(!rows.length) errors.push(`${source.name}: no current IPO rows parsed`);
     }catch(e){
       errors.push(`${source.name}: ${e.message}`);
     }
   }
 
-  collected = dedupe(collected).filter(x=>x.status==="open" || x.status==="upcoming");
+  collected=dedupe(collected)
+    .filter(x=>x.name && x.name.length>2)
+    .filter(x=>x.status==="open" || x.status==="upcoming");
 
   if(!collected.length){
     return res.status(502).json({
       ok:false,
-      message:"Public IPO sources could not be read right now. No API key is required; the source pages may have changed or temporarily blocked automated access.",
+      message:"Public IPO pages were reachable but no valid current IPO names could be parsed.",
       errors
     });
   }
@@ -240,7 +252,7 @@ export default async function handler(req,res){
   return res.status(200).json({
     ok:true,
     provider:"Public web sources",
-    sourceNote:"GMP is unofficial. Data is collected from publicly accessible IPO tracking pages and may be delayed.",
+    sourceNote:"GMP is unofficial and may be delayed.",
     fetchedAt:new Date().toISOString(),
     count:collected.length,
     data:collected,

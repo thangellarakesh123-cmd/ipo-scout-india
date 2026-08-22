@@ -81,7 +81,10 @@ function App(){
 
   useEffect(()=>{ refresh(); const id=setInterval(refresh, 5*60*1000); return ()=>clearInterval(id); },[]);
 
-  const ranked = useMemo(()=>ipos.map(i=>({...i, score:scoreIPO(i)})).sort((a,b)=>b.score-a.score),[ipos]);
+  const ranked = useMemo(()=>ipos
+    .filter(i => i.name && !/^(opens|closes|open|upcoming)\b/i.test(i.name))
+    .map(i=>({...i, score:scoreIPO(i)}))
+    .sort((a,b)=>b.score-a.score),[ipos]);
   const open = ranked.filter(i=>i.status==="open");
   const best = open[0] || ranked[0];
   const filtered = ranked.filter(i => {
