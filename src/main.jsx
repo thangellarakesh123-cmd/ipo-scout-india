@@ -29,19 +29,17 @@ function listingScore(ipo){
 }
 
 function investmentQualityScore(ipo){
-  // Fundamentals are intentionally not fabricated. Until verified RHP/financial
-  // fields are available, this score remains unavailable rather than guessing.
   const f = ipo.fundamentals;
   if(!f || !f.verified) return null;
 
-  let score = 0;
-  score += clamp(num(f.revenueGrowthPct) / 30 * 20, 0, 20);
-  score += clamp(num(f.profitGrowthPct) / 35 * 20, 0, 20);
-  score += clamp(num(f.roePct) / 25 * 15, 0, 15);
-  score += clamp(num(f.rocePct) / 25 * 15, 0, 15);
-  score += clamp((1 - num(f.debtToEquity) / 2) * 10, 0, 10);
-  score += clamp(num(f.valuationScore), 0, 20);
-  return Math.round(clamp(score,0,100));
+  const revenue = clamp((num(f.revenueGrowthPct) + 5) / 35 * 20, 0, 20);
+  const profit = clamp((num(f.profitGrowthPct) + 5) / 45 * 20, 0, 20);
+  const roe = clamp(num(f.roePct) / 25 * 15, 0, 15);
+  const roce = clamp(num(f.rocePct) / 25 * 15, 0, 15);
+  const debt = clamp((1.5 - num(f.debtToEquity)) / 1.5 * 10, 0, 10);
+  const valuation = clamp(num(f.valuationScore), 0, 20);
+
+  return Math.round(clamp(revenue + profit + roe + roce + debt + valuation,0,100));
 }
 
 function overallScore(ipo){
@@ -257,6 +255,14 @@ function App(){
           <div><span>Listing Gain</span><b>{ipo.listingScore}/100</b></div>
           <div><span>Investment Quality</span><b>{ipo.qualityScore === null ? "Pending" : `${ipo.qualityScore}/100`}</b></div>
         </div>
+        {ipo.fundamentals?.verified && <div className="fundamentals">
+          <div><span>Revenue growth</span><b>{num(ipo.fundamentals.revenueGrowthPct).toFixed(1)}%</b></div>
+          <div><span>PAT growth</span><b>{num(ipo.fundamentals.profitGrowthPct).toFixed(1)}%</b></div>
+          <div><span>ROE</span><b>{num(ipo.fundamentals.roePct).toFixed(1)}%</b></div>
+          <div><span>ROCE</span><b>{num(ipo.fundamentals.rocePct).toFixed(1)}%</b></div>
+          <div><span>Debt/Equity</span><b>{num(ipo.fundamentals.debtToEquity).toFixed(2)}</b></div>
+          <div><span>Pre-IPO P/E</span><b>{ipo.fundamentals.preIPOPE ? `${num(ipo.fundamentals.preIPOPE).toFixed(1)}x` : "N/A"}</b></div>
+        </div>}
         <div className="metrics">
           <div><span>Price Band</span><b>₹{ipo.priceMin || "—"}–₹{ipo.priceMax || "—"}</b></div>
           <div><span>GMP</span><b>{formatINR(ipo.gmp)}</b></div>
@@ -269,6 +275,7 @@ function App(){
           <strong>{bidGuidance(ipo).title}</strong>
           <span>{bidGuidance(ipo).detail}</span>
         </div>
+        {ipo.fundamentals?.source && <div className="fund-source">Fundamentals: RHP/DRHP-derived public data via InvestorGain</div>}
         <div className="card-foot">
           <span>Closes: {ipo.closeDate || "TBA"}</span>
           <span>Min. investment: {minInvestment(ipo) > 0 ? formatINR(minInvestment(ipo)) : "Not available"}</span>
@@ -279,7 +286,7 @@ function App(){
     <section className="logic">
       <h2>Two-Score Ranking Model</h2>
       <p><b>Listing Gain Score:</b> 45% GMP · 35% total subscription · 10% QIB demand when available · 10% Mainboard/SME adjustment.</p>
-      <p><b>Investment Quality Score:</b> verified revenue/profit growth, ROE/ROCE, debt and valuation from offer documents. If verified fundamentals are unavailable, the dashboard shows <b>Pending</b> instead of inventing a score.</p>
+      <p><b>Investment Quality Score:</b> revenue/PAT growth, ROE, ROCE, debt/equity and valuation data extracted from public IPO financial highlights derived from RHP/DRHP disclosures. Valuation currently uses a conservative pre-IPO P/E heuristic; if reliable fundamentals are unavailable, the dashboard shows <b>Pending</b>.</p>
       <p>When both are available, Overall Score = <b>45% Listing Gain + 55% Investment Quality</b>. 80+ Strong Candidate · 65–79 Good Candidate · 50–64 Watch · below 50 Higher Caution.</p>
     </section>
   </main>

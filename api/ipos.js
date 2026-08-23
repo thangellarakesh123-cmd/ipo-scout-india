@@ -64,6 +64,16 @@ function companyFromRow($, tr){
   }
   return "";
 }
+function investorGainDetailUrl($, tr){
+  const anchors = $(tr).find("a").toArray();
+  for(const a of anchors){
+    const href = String($(a).attr("href") || "");
+    if(/investorgain\.com\/ipo\//i.test(href)) return href;
+    if(/^\/ipo\//i.test(href)) return `https://www.investorgain.com${href}`;
+  }
+  return "";
+}
+
 
 function parseIPOMarkets(html){
   const $ = cheerio.load(html);
@@ -158,7 +168,8 @@ function parseInvestorGain(html){
       gmp:money(gmpCell),
       gmpPercentage:parsePercent(gmpCell),
       subscription:{qib:0,nii:0,retail:0,total:parseSubscription(subCell)},
-      source:"InvestorGain"
+      source:"InvestorGain",
+      detailUrl: investorGainDetailUrl($,tr)
     });
   });
 
@@ -189,7 +200,8 @@ function parseInvestorGain(html){
         gmp:Number(hero[3]),
         gmpPercentage:Number(hero[4]),
         subscription:{qib:0,nii:0,retail:0,total:Number(hero[7])},
-        source:"InvestorGain"
+        source:"InvestorGain",
+        detailUrl:""
       });
     }
   }
@@ -255,6 +267,7 @@ function mergeRecords(a,b){
   primary.issueSize = primary.issueSize || other.issueSize || 0;
   primary.openDate = primary.openDate || other.openDate || "";
   primary.closeDate = primary.closeDate || other.closeDate || "";
+  primary.detailUrl = primary.detailUrl || other.detailUrl || "";
   primary.subscription = {
     qib: primary.subscription?.qib || other.subscription?.qib || 0,
     nii: primary.subscription?.nii || other.subscription?.nii || 0,
@@ -289,6 +302,142 @@ function dedupe(items){
   return [...map.values()];
 }
 
+
+function pctGrowth(current, previous){
+  current = Number(current || 0);
+  previous = Number(previous || 0);
+  if(!previous) return 0;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+function valuationScoreFromPE(pe){
+  pe = Number(pe || 0);
+  if(!pe) return 10; // neutral if not available
+  if(pe <= 15) return 19;
+  if(pe <= 25) return 16;
+  if(pe <= 40) return 12;
+  if(pe <= 60) return 8;
+  if(pe <= 90) return 5;
+  return 2;
+}
+
+function parseFundamentals(html, url){
+  const $ = cheerio.load(html);
+
+  let latestIncome = 0, previousIncome = 0;
+  let latestPAT = 0, previousPAT = 0;
+  let roe = 0, roce = 0, debtEquity = 0, prePE = 0, postPE = 0, pbv = 0;
+
+  $("table").each((_,table)=>{
+    const rows = $(table).find("tr").toArray();
+    for(const row of rows){
+      const cells = $(row).find("th,td").map((_,td)=>clean($(td).text())).get();
+      if(cells.length < 2) continue;
+      const key = clean(cells[0]).toLowerCase();
+
+      if(/^(total income|revenue from operations|revenue)$/.test(key)){
+        latestIncome = n(cells[1]);
+        previousIncome = n(cells[2]);
+      }
+      if(/^(profit after tax|pat)$/.test(key)){
+        latestPAT = n(cells[1]);
+        previousPAT = n(cells[2]);
+      }
+
+      if(/^roe\b/.test(key)) roe = parsePercent(cells[1]);
+      if(/^roce\b/.test(key)) roce = parsePercent(cells[1]);
+      if(/debt\s*\/?\s*equity/.test(key)) debtEquity = n(cells[1]);
+      if(/price to book value/.test(key)) pbv = n(cells[1]);
+
+      if(/^p\/e\b/.test(key) || /^p\/e \(x\)/.test(key)){
+        prePE = n(cells[1]);
+        postPE = n(cells[2]);
+      }
+    }
+  });
+
+  // Fallback text parsing for layouts that are not standard HTML tables.
+  const body = clean($("body").text());
+
+  if(!roe){
+    const m = body.match(/\bROE\s+([0-9]+(?:\.[0-9]+)?)%/i);
+    if(m) roe = Number(m[1]);
+  }
+  if(!roce){
+    const m = body.match(/\bROCE\s+([0-9]+(?:\.[0-9]+)?)%/i);
+    if(m) roce = Number(m[1]);
+  }
+  if(!debtEquity){
+    const m = body.match(/Debt\s*\/\s*Equity\s+([0-9]+(?:\.[0-9]+)?)/i);
+    if(m) debtEquity = Number(m[1]);
+  }
+  if(!prePE){
+    const m = body.match(/P\/E\s*\(x\)\s+([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)/i);
+    if(m){ prePE = Number(m[1]); postPE = Number(m[2]); }
+  }
+  if(!pbv){
+    const m = body.match(/Price to Book Value\s+([0-9]+(?:\.[0-9]+)?)/i);
+    if(m) pbv = Number(m[1]);
+  }
+
+  // InvestorGain often states growth explicitly in prose. Use that only as
+  // fallback when table-based calculation is unavailable.
+  let revenueGrowthPct = latestIncome && previousIncome ? pctGrowth(latestIncome, previousIncome) : 0;
+  let profitGrowthPct = latestPAT && previousPAT ? pctGrowth(latestPAT, previousPAT) : 0;
+
+  if(!revenueGrowthPct){
+    const m = body.match(/revenue increased by\s+([0-9]+(?:\.[0-9]+)?)%/i);
+    if(m) revenueGrowthPct = Number(m[1]);
+  }
+  if(!profitGrowthPct){
+    const m = body.match(/profit after tax\s*\(PAT\)\s*rose by\s+([0-9]+(?:\.[0-9]+)?)%/i)
+      || body.match(/profit after tax.*?increased by\s+([0-9]+(?:\.[0-9]+)?)%/i);
+    if(m) profitGrowthPct = Number(m[1]);
+  }
+
+  const enoughData =
+    (revenueGrowthPct !== 0 || profitGrowthPct !== 0) &&
+    (roe > 0 || roce > 0 || debtEquity >= 0) &&
+    (prePE > 0 || pbv > 0);
+
+  return {
+    verified: Boolean(enoughData),
+    revenueGrowthPct: Math.round(revenueGrowthPct * 100) / 100,
+    profitGrowthPct: Math.round(profitGrowthPct * 100) / 100,
+    roePct: roe,
+    rocePct: roce,
+    debtToEquity: debtEquity,
+    preIPOPE: prePE,
+    postIPOPE: postPE,
+    priceToBook: pbv,
+    valuationScore: valuationScoreFromPE(prePE),
+    valuationMethod: prePE ? "Absolute pre-IPO P/E heuristic" : "Neutral fallback; P/E unavailable",
+    source: url,
+    sourceLabel: "InvestorGain financial highlights (from RHP/DRHP data)"
+  };
+}
+
+async function enrichFundamentals(items, errors){
+  const targets = items.filter(x => x.detailUrl && /investorgain\.com\/ipo\//i.test(x.detailUrl));
+
+  // Keep serverless execution light; current dashboard generally has a small
+  // number of open/upcoming IPOs.
+  const enriched = await Promise.all(items.map(async item => {
+    if(!item.detailUrl) return {...item, fundamentals:null};
+
+    try{
+      const html = await fetchPage(item.detailUrl);
+      const fundamentals = parseFundamentals(html, item.detailUrl);
+      return {...item, fundamentals};
+    }catch(e){
+      errors.push(`${item.name} fundamentals: ${e.message}`);
+      return {...item, fundamentals:null};
+    }
+  }));
+
+  return enriched;
+}
+
 export default async function handler(req,res){
   res.setHeader("Cache-Control","s-maxage=60, stale-while-revalidate=300");
   const errors=[];
@@ -316,6 +465,10 @@ export default async function handler(req,res){
           ? Number(x.lotSize) * Number(x.priceMax)
           : 0
     }));
+
+  if(collected.length){
+    collected = await enrichFundamentals(collected, errors);
+  }
 
   if(!collected.length){
     return res.status(502).json({

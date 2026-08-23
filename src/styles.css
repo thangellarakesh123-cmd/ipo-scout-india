@@ -43,3 +43,31 @@
 @media(max-width:600px){
   .score-breakdown,.mini-scores{grid-template-columns:1fr;}
 }
+
+.fundamentals{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin-top:12px;
+}
+.fundamentals>div{
+  background:#0b182a;
+  border:1px solid #1c3353;
+  border-radius:9px;
+  padding:9px;
+}
+.fundamentals span{
+  display:block;
+  color:#8195b4;
+  font-size:.68rem;
+  margin-bottom:3px;
+}
+.fundamentals b{font-size:.82rem;}
+.fund-source{
+  margin-top:10px;
+  color:#7589a8;
+  font-size:.67rem;
+}
+@media(max-width:620px){
+  .fundamentals{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
