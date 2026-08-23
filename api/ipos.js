@@ -75,6 +75,21 @@ function investorGainDetailUrl($, tr){
 }
 
 
+
+function ipoMarketsDetailUrl($, tr){
+  const anchors = $(tr).find("a").toArray();
+  for(const a of anchors){
+    const hrefRaw = String($(a).attr("href") || "");
+    if(!hrefRaw) continue;
+    let href = hrefRaw;
+    if(href.startsWith("/")) href = `https://ipomarkets.com${href}`;
+    if(/^https?:\/\/(www\.)?ipomarkets\.com\/ipo\/[^/]+\/?$/i.test(href)){
+      return href.replace(/\/$/,"");
+    }
+  }
+  return "";
+}
+
 function parseIPOMarkets(html){
   const $ = cheerio.load(html);
   const items = [];
@@ -117,7 +132,8 @@ function parseIPOMarkets(html){
       gmp:money(gmpCell),
       gmpPercentage:parsePercent(gmpCell),
       subscription:{qib:0,nii:0,retail:0,total:parseSubscription(subCell)},
-      source:"IPOMarkets"
+      source:"IPOMarkets",
+      detailUrl: ipoMarketsDetailUrl($,tr)
     });
   });
 
@@ -485,26 +501,110 @@ function parseFundamentals(html, url){
   };
 }
 
+
+function parseIPOMarketsFundamentals(html, url){
+  const $ = cheerio.load(html);
+  const body = clean($("body").text());
+
+  let roe = 0, roce = 0, debtEquity = 0, pe = 0;
+  let revenueGrowthPct = 0, profitGrowthPct = 0;
+
+  const roeMatch = body.match(/\bRoNW\s+([0-9]+(?:\.[0-9]+)?)%/i)
+    || body.match(/\bROE\s+([0-9]+(?:\.[0-9]+)?)%/i);
+  if(roeMatch) roe = Number(roeMatch[1]);
+
+  const roceMatch = body.match(/\bROCE\s+([0-9]+(?:\.[0-9]+)?)%/i);
+  if(roceMatch) roce = Number(roceMatch[1]);
+
+  const deMatch = body.match(/Debt\s*\/\s*Equity\s+([0-9]+(?:\.[0-9]+)?)/i);
+  if(deMatch) debtEquity = Number(deMatch[1]);
+
+  const peMatch = body.match(/\bP\/E\s+([0-9]+(?:\.[0-9]+)?)×/i)
+    || body.match(/\bP\/E\s+([0-9]+(?:\.[0-9]+)?)x/i);
+  if(peMatch) pe = Number(peMatch[1]);
+
+  const revCagrMatch = body.match(/Revenue CAGR\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i);
+  if(revCagrMatch) revenueGrowthPct = Number(revCagrMatch[1]);
+
+  const patGrowthMatch = body.match(/PAT growth\s*\(YoY\)\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i);
+  if(patGrowthMatch) profitGrowthPct = Number(patGrowthMatch[1]);
+
+  // Fallback: parse the financials table and calculate latest FY YoY.
+  if(!revenueGrowthPct || !profitGrowthPct){
+    $("table").each((_,table)=>{
+      const rows = $(table).find("tr").toArray();
+      const header = rows[0] ? $(rows[0]).find("th,td").map((_,td)=>clean($(td).text())).get() : [];
+      if(!header.some(x=>/^Period$/i.test(x)) || !header.some(x=>/^Revenue$/i.test(x)) || !header.some(x=>/^PAT$/i.test(x))) return;
+
+      const dataRows = rows.slice(1).map(row => $(row).find("th,td").map((_,td)=>clean($(td).text())).get())
+        .filter(cells => cells.length >= 3 && /FY20\d{2}/i.test(cells[0]));
+
+      if(dataRows.length >= 2){
+        const latestRev = numberFrom(dataRows[0][1]);
+        const prevRev = numberFrom(dataRows[1][1]);
+        const latestPat = numberFrom(dataRows[0][2]);
+        const prevPat = numberFrom(dataRows[1][2]);
+        if(!revenueGrowthPct && prevRev) revenueGrowthPct = ((latestRev-prevRev)/Math.abs(prevRev))*100;
+        if(!profitGrowthPct && prevPat) profitGrowthPct = ((latestPat-prevPat)/Math.abs(prevPat))*100;
+      }
+    });
+  }
+
+  const metricCount = [
+    revenueGrowthPct !== 0,
+    profitGrowthPct !== 0,
+    roe > 0,
+    roce > 0,
+    pe > 0
+  ].filter(Boolean).length;
+
+  return {
+    verified: metricCount >= 3,
+    revenueGrowthPct: Math.round(revenueGrowthPct*100)/100,
+    profitGrowthPct: Math.round(profitGrowthPct*100)/100,
+    roePct: roe,
+    rocePct: roce,
+    debtToEquity: debtEquity,
+    preIPOPE: pe,
+    postIPOPE: pe,
+    priceToBook: 0,
+    valuationScore: valuationScoreFromPE(pe),
+    valuationMethod: pe ? "Absolute issue P/E heuristic" : "Neutral fallback; P/E unavailable",
+    source: url,
+    sourceLabel: "IPOMarkets financials re-derived from public offer documents"
+  };
+}
+
 async function enrichFundamentals(items, errors, investorGainHomeHtml){
-  const links = discoverInvestorGainLinks(investorGainHomeHtml || "");
+  const investorLinks = discoverInvestorGainLinks(investorGainHomeHtml || "");
 
   return await Promise.all(items.map(async item => {
-    const discovered = bestInvestorGainLink(item.name, links);
-    const detailUrl = item.detailUrl || discovered;
-
-    if(!detailUrl){
-      errors.push(`${item.name} fundamentals: InvestorGain detail page not matched`);
-      return {...item, fundamentals:null};
+    // Prefer IPOMarkets detail pages because the main live feed already comes
+    // from IPOMarkets and those detail pages expose financials in structured HTML.
+    if(item.detailUrl && /ipomarkets\.com\/ipo\//i.test(item.detailUrl)){
+      try{
+        const html = await fetchPage(item.detailUrl);
+        const fundamentals = parseIPOMarketsFundamentals(html, item.detailUrl);
+        if(fundamentals.verified) return {...item, fundamentals};
+      }catch(e){
+        errors.push(`${item.name} IPOMarkets fundamentals: ${e.message}`);
+      }
     }
 
-    try{
-      const html = await fetchPage(detailUrl);
-      const fundamentals = parseFundamentals(html, detailUrl);
-      return {...item, detailUrl, fundamentals};
-    }catch(e){
-      errors.push(`${item.name} fundamentals: ${e.message}`);
-      return {...item, detailUrl, fundamentals:null};
+    // Fallback to InvestorGain only if a matching detail page can be found.
+    const investorUrl = bestInvestorGainLink(item.name, investorLinks);
+    if(investorUrl){
+      try{
+        const html = await fetchPage(investorUrl);
+        const fundamentals = parseFundamentals(html, investorUrl);
+        if(fundamentals.verified) return {...item, fundamentals};
+      }catch(e){
+        errors.push(`${item.name} InvestorGain fundamentals: ${e.message}`);
+      }
     }
+
+    errors.push(`${item.name} fundamentals: no verified detail metrics parsed`);
+    return {...item, fundamentals:null};
   }));
 }
 
