@@ -303,6 +303,68 @@ function dedupe(items){
 }
 
 
+
+function companyKey(name){
+  return clean(name)
+    .toLowerCase()
+    .replace(/\b(limited|ltd|india|private|pvt|ipo|mainboard|sme)\b/g," ")
+    .replace(/[^a-z0-9]/g,"");
+}
+
+function discoverInvestorGainLinks(html){
+  const $ = cheerio.load(html);
+  const links = [];
+
+  $('a[href*="/ipo/"]').each((_,a)=>{
+    const hrefRaw = String($(a).attr("href") || "");
+    let href = hrefRaw;
+    if(href.startsWith("/")) href = `https://www.investorgain.com${href}`;
+    if(!/^https?:\/\/(www\.)?investorgain\.com\/ipo\//i.test(href)) return;
+
+    const text = clean($(a).text());
+    const imgAlt = clean($(a).find("img").first().attr("alt") || "");
+    const title = clean($(a).attr("title") || "");
+    const label = [text, imgAlt, title].filter(Boolean).join(" ");
+    if(!label) return;
+
+    links.push({
+      href,
+      label,
+      key: companyKey(label)
+    });
+  });
+
+  // unique by URL
+  return [...new Map(links.map(x=>[x.href,x])).values()];
+}
+
+function bestInvestorGainLink(name, links){
+  const target = companyKey(name);
+  if(!target) return "";
+
+  // Exact/contained normalized name is most reliable.
+  let hit = links.find(x => x.key === target || x.key.includes(target) || target.includes(x.key));
+  if(hit) return hit.href;
+
+  // Token overlap fallback.
+  const tokens = clean(name).toLowerCase()
+    .replace(/\b(limited|ltd|india|private|pvt|ipo|mainboard|sme)\b/g," ")
+    .split(/[^a-z0-9]+/)
+    .filter(t=>t.length>=3);
+
+  let best = null, bestScore = 0;
+  for(const x of links){
+    const l = x.label.toLowerCase();
+    const matched = tokens.filter(t=>l.includes(t)).length;
+    const score = tokens.length ? matched / tokens.length : 0;
+    if(score > bestScore){
+      bestScore = score;
+      best = x;
+    }
+  }
+  return bestScore >= 0.6 ? best.href : "";
+}
+
 function pctGrowth(current, previous){
   current = Number(current || 0);
   previous = Number(previous || 0);
@@ -395,10 +457,16 @@ function parseFundamentals(html, url){
     if(m) profitGrowthPct = Number(m[1]);
   }
 
-  const enoughData =
-    (revenueGrowthPct !== 0 || profitGrowthPct !== 0) &&
-    (roe > 0 || roce > 0 || debtEquity >= 0) &&
-    (prePE > 0 || pbv > 0);
+  const metricCount = [
+    revenueGrowthPct !== 0,
+    profitGrowthPct !== 0,
+    roe > 0,
+    roce > 0,
+    prePE > 0,
+    pbv > 0
+  ].filter(Boolean).length;
+
+  const enoughData = metricCount >= 3;
 
   return {
     verified: Boolean(enoughData),
@@ -417,35 +485,39 @@ function parseFundamentals(html, url){
   };
 }
 
-async function enrichFundamentals(items, errors){
-  const targets = items.filter(x => x.detailUrl && /investorgain\.com\/ipo\//i.test(x.detailUrl));
+async function enrichFundamentals(items, errors, investorGainHomeHtml){
+  const links = discoverInvestorGainLinks(investorGainHomeHtml || "");
 
-  // Keep serverless execution light; current dashboard generally has a small
-  // number of open/upcoming IPOs.
-  const enriched = await Promise.all(items.map(async item => {
-    if(!item.detailUrl) return {...item, fundamentals:null};
+  return await Promise.all(items.map(async item => {
+    const discovered = bestInvestorGainLink(item.name, links);
+    const detailUrl = item.detailUrl || discovered;
 
-    try{
-      const html = await fetchPage(item.detailUrl);
-      const fundamentals = parseFundamentals(html, item.detailUrl);
-      return {...item, fundamentals};
-    }catch(e){
-      errors.push(`${item.name} fundamentals: ${e.message}`);
+    if(!detailUrl){
+      errors.push(`${item.name} fundamentals: InvestorGain detail page not matched`);
       return {...item, fundamentals:null};
     }
-  }));
 
-  return enriched;
+    try{
+      const html = await fetchPage(detailUrl);
+      const fundamentals = parseFundamentals(html, detailUrl);
+      return {...item, detailUrl, fundamentals};
+    }catch(e){
+      errors.push(`${item.name} fundamentals: ${e.message}`);
+      return {...item, detailUrl, fundamentals:null};
+    }
+  }));
 }
 
 export default async function handler(req,res){
   res.setHeader("Cache-Control","s-maxage=60, stale-while-revalidate=300");
   const errors=[];
   let collected=[];
+  let investorGainHomeHtml = "";
 
   for(const source of SOURCES){
     try{
       const html=await fetchPage(source.url);
+      if(source.name === "InvestorGain") investorGainHomeHtml = html;
       const rows=source.parser(html);
       collected.push(...rows);
       if(!rows.length) errors.push(`${source.name}: no current IPO rows parsed`);
@@ -467,7 +539,7 @@ export default async function handler(req,res){
     }));
 
   if(collected.length){
-    collected = await enrichFundamentals(collected, errors);
+    collected = await enrichFundamentals(collected, errors, investorGainHomeHtml);
   }
 
   if(!collected.length){
