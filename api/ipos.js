@@ -131,7 +131,13 @@ function parseInvestorGain(html){
     const gmpCell = cells.find(x=>/₹/.test(x) && /%/.test(x)) || cells.find(x=>/^₹/.test(x)) || "";
     const subCell = cells.find(x=>/\d+(?:\.\d+)?\s*[x×]/i.test(x)) || "";
     const issuePriceCell = cells.find((x,i)=>i>0 && /^₹?\d+(?:\.\d+)?$/.test(x)) || "";
-    const lotCell = cells.find(x=>/lot/i.test(x)) || "";
+    const lotLabelIndex = cells.findIndex(x=>/lot\s*size/i.test(x));
+    let lotCell = lotLabelIndex >= 0 ? (cells[lotLabelIndex + 1] || cells[lotLabelIndex]) : "";
+    if(!lotCell){
+      const joinedWithLabels = clean($(tr).text());
+      const lotMatch = joinedWithLabels.match(/Lot\s*Size\s*[:\-]?\s*(\d{1,6})/i);
+      lotCell = lotMatch ? lotMatch[1] : "";
+    }
     const dateCell = cells.find(x=>/\d{1,2}\s+[A-Za-z]{3}/.test(x)) || "";
 
     const issuePrice = money(issuePriceCell);
@@ -302,7 +308,14 @@ export default async function handler(req,res){
   collected=dedupe(collected)
     .filter(x=>x.name && x.name.length>2)
     .filter(x=>!isGarbageName(x.name))
-    .filter(x=>x.status==="open" || x.status==="upcoming");
+    .filter(x=>x.status==="open" || x.status==="upcoming")
+    .map(x=>({
+      ...x,
+      minInvestment:
+        Number(x.lotSize || 0) > 0 && Number(x.priceMax || 0) > 0
+          ? Number(x.lotSize) * Number(x.priceMax)
+          : 0
+    }));
 
   if(!collected.length){
     return res.status(502).json({

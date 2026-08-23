@@ -35,12 +35,71 @@ function recommendation(score, ipo){
   if(score >= 50) return "Wait";
   return "Avoid";
 }
-function risk(ipo){
-  let r = 50;
-  if(ipo.type === "sme") r += 15;
-  if(num(ipo.issueSize) < 100) r += 10;
-  if(num(ipo.subscription?.qib) < 1) r += 10;
-  return r >= 70 ? "High" : r >= 55 ? "Medium" : "Low";
+function riskAssessment(ipo){
+  const gmpPct = num(ipo.gmpPercentage) || (num(ipo.priceMax) > 0 ? (num(ipo.gmp) / num(ipo.priceMax)) * 100 : 0);
+  const sub = num(ipo.subscription?.total);
+  const score = scoreIPO(ipo);
+
+  let riskScore = 55;
+
+  // Mainboard IPOs usually have lower liquidity/lot-size risk than SME IPOs.
+  if(ipo.type === "mainboard") riskScore -= 12;
+  else riskScore += 18;
+
+  // Strong demand and positive GMP reduce the dashboard's market-signal risk.
+  if(sub >= 10) riskScore -= 14;
+  else if(sub >= 3) riskScore -= 8;
+  else if(sub > 0 && sub < 1) riskScore += 10;
+
+  if(gmpPct >= 20) riskScore -= 12;
+  else if(gmpPct >= 8) riskScore -= 6;
+  else if(gmpPct <= 0) riskScore += 10;
+
+  if(score >= 80) riskScore -= 8;
+  else if(score < 50) riskScore += 10;
+
+  riskScore = clamp(Math.round(riskScore), 15, 95);
+
+  if(riskScore <= 35) return {label:"Lower", score:riskScore, note:"Stronger current demand/GMP signals"};
+  if(riskScore <= 60) return {label:"Moderate", score:riskScore, note:"Mixed current market signals"};
+  return {label:"Higher", score:riskScore, note:"Weaker signals or SME/liquidity risk"};
+}
+
+function minInvestment(ipo){
+  const explicit = num(ipo.minInvestment);
+  if(explicit > 0) return explicit;
+  const lot = num(ipo.lotSize);
+  const price = num(ipo.priceMax);
+  return lot > 0 && price > 0 ? lot * price : 0;
+}
+
+function bidGuidance(ipo){
+  if(ipo.status !== "open"){
+    return {
+      title:"Wait for bidding to open",
+      detail:"The IPO is not open yet. Review the final price band and lot size once bidding starts."
+    };
+  }
+
+  const lot = num(ipo.lotSize);
+  const price = num(ipo.priceMax);
+  const min = minInvestment(ipo);
+
+  if(ipo.type === "mainboard"){
+    return {
+      title:"Retail: bid at Cut-off",
+      detail: lot > 0 && min > 0
+        ? `For a retail application, 1 lot = ${lot} shares (about ${formatINR(min)} at the upper price). Applying at Cut-off keeps your bid valid across the final discovered price. If the retail category is heavily oversubscribed, applying for extra lots generally does not multiply your allotment odds like separate PAN applications would; use only one application per PAN.`
+        : "For a retail application, choose Cut-off price where your broker supports it and submit only one application per PAN. Lot size is not available from the current free source, so the exact minimum amount cannot be calculated yet."
+    };
+  }
+
+  return {
+    title:"SME: check minimum lots carefully",
+    detail: lot > 0 && min > 0
+      ? `SME applications can require larger lot commitments. Current minimum shown by available data is about ${formatINR(min)} for ${lot} shares. Use the permitted price/bid settings shown by your broker and avoid multiple applications using the same PAN.`
+      : "SME IPOs often require a much larger minimum application. Confirm the mandatory lot quantity and amount in your broker before applying."
+  };
 }
 
 async function fetchIPOData(){
@@ -139,10 +198,10 @@ function App(){
         <p className="eyebrow">BEST IPO TO WATCH / APPLY</p>
         <h2>{best.name}</h2>
         <p>{best.sector} · {best.type === "sme" ? "SME" : "Mainboard"} · {best.symbol}</p>
-        <div className="chips"><span>{recommendation(best.score,best)}</span><span>Risk: {risk(best)}</span><span>GMP: {formatINR(best.gmp)}</span></div>
+        <div className="chips"><span>{recommendation(best.score,best)}</span><span>Risk: {riskAssessment(best).label} ({riskAssessment(best).score}/100)</span><span>GMP: {formatINR(best.gmp)}</span></div>
       </div>
       <div className="score-ring"><strong>{best.score}</strong><small>/100</small></div>
-      <div className="disclaimer">Ranking is algorithmic and informational only. IPO investing involves risk and GMP is unofficial.</div>
+      <div className="disclaimer">Risk and ranking are based on current market signals such as GMP, subscription demand and SME/Mainboard type. They are informational only; GMP is unofficial and allotment/profit is never guaranteed.</div>
     </section>}
 
     <section className="toolbar">
@@ -166,11 +225,15 @@ function App(){
           <div><span>Total Sub.</span><b>{formatX(ipo.subscription.total)}</b></div>
           <div><span>GMP %</span><b>{num(ipo.gmpPercentage).toFixed(2)}%</b></div>
           <div><span>Source</span><b>{ipo.source || "Public web"}</b></div>
-          <div><span>Risk</span><b>{risk(ipo)}</b></div>
+          <div><span>Risk</span><b>{riskAssessment(ipo).label} ({riskAssessment(ipo).score}/100)</b></div>
+        </div>
+        <div className="bid-guide">
+          <strong>{bidGuidance(ipo).title}</strong>
+          <span>{bidGuidance(ipo).detail}</span>
         </div>
         <div className="card-foot">
           <span>Closes: {ipo.closeDate || "TBA"}</span>
-          <span>Min. investment: {ipo.lotSize && ipo.priceMax ? formatINR(ipo.lotSize*ipo.priceMax) : "TBA"}</span>
+          <span>Min. investment: {minInvestment(ipo) > 0 ? formatINR(minInvestment(ipo)) : "Not available"}</span>
         </div>
       </article>)}
     </section>
@@ -178,7 +241,7 @@ function App(){
     <section className="logic">
       <h2>Ranking Logic</h2>
       <p><b>50%</b> GMP strength · <b>35%</b> total subscription · <b>15%</b> Mainboard/SME risk adjustment. Free public-source data only; no API key required.</p>
-      <p>Score 80+ Strong Apply · 65–79 Apply · 50–64 Wait · below 50 Avoid.</p>
+      <p>Score 80+ Strong Apply · 65–79 Apply · 50–64 Wait · below 50 Avoid. Risk is shown separately as Lower / Moderate / Higher using current demand, GMP and SME/Mainboard factors.</p>
     </section>
   </main>
 }
