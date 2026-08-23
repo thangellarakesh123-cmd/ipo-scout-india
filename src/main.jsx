@@ -14,31 +14,61 @@ function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function formatX(v){ return `${num(v).toFixed(2)}x`; }
 function formatINR(v){ return new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(num(v)); }
 
-function scoreIPO(ipo){
+function listingScore(ipo){
   const p = Math.max(num(ipo.priceMax), 1);
-  const gmpPct = num(ipo.gmp) / p * 100;
-  const gmpScore = clamp(gmpPct / 25 * 35, 0, 35);
+  const gmpPct = num(ipo.gmpPercentage) || (num(ipo.gmp) / p * 100);
   const total = num(ipo.subscription?.total);
-  const demandScore = clamp(Math.log10(total + 1) / Math.log10(31) * 30, 0, 30);
   const qib = num(ipo.subscription?.qib);
-  const qibScore = clamp(Math.log10(qib + 1) / Math.log10(31) * 20, 0, 20);
-  const issue = num(ipo.issueSize);
-  const issueScore = clamp((1 - Math.min(issue, 5000)/5000) * 10, 0, 10);
-  const typeScore = ipo.type === "mainboard" ? 5 : 2;
+
+  const gmpScore = clamp(gmpPct / 30 * 45, 0, 45);
+  const demandScore = clamp(Math.log10(total + 1) / Math.log10(51) * 35, 0, 35);
+  const qibScore = qib > 0 ? clamp(Math.log10(qib + 1) / Math.log10(31) * 10, 0, 10) : 5;
+  const boardScore = ipo.type === "mainboard" ? 10 : 5;
   const freshness = ipo.status === "open" ? 1 : 0.55;
-  return Math.round(clamp((gmpScore + demandScore + qibScore + issueScore + typeScore) * freshness, 0, 100));
+  return Math.round(clamp((gmpScore + demandScore + qibScore + boardScore) * freshness, 0, 100));
+}
+
+function investmentQualityScore(ipo){
+  // Fundamentals are intentionally not fabricated. Until verified RHP/financial
+  // fields are available, this score remains unavailable rather than guessing.
+  const f = ipo.fundamentals;
+  if(!f || !f.verified) return null;
+
+  let score = 0;
+  score += clamp(num(f.revenueGrowthPct) / 30 * 20, 0, 20);
+  score += clamp(num(f.profitGrowthPct) / 35 * 20, 0, 20);
+  score += clamp(num(f.roePct) / 25 * 15, 0, 15);
+  score += clamp(num(f.rocePct) / 25 * 15, 0, 15);
+  score += clamp((1 - num(f.debtToEquity) / 2) * 10, 0, 10);
+  score += clamp(num(f.valuationScore), 0, 20);
+  return Math.round(clamp(score,0,100));
+}
+
+function overallScore(ipo){
+  const listing = listingScore(ipo);
+  const quality = investmentQualityScore(ipo);
+  // Do not pretend missing fundamentals are known.
+  return quality === null ? listing : Math.round(listing * 0.45 + quality * 0.55);
 }
 function recommendation(score, ipo){
   if(ipo.status !== "open") return "Upcoming";
-  if(score >= 80) return "Strong Apply";
-  if(score >= 65) return "Apply";
-  if(score >= 50) return "Wait";
-  return "Avoid";
+  if(score >= 80) return "Strong Candidate";
+  if(score >= 65) return "Good Candidate";
+  if(score >= 50) return "Watch";
+  return "Higher Caution";
+}
+
+function qualityLabel(score){
+  if(score === null || score === undefined) return "Pending verified fundamentals";
+  if(score >= 80) return "Strong";
+  if(score >= 65) return "Good";
+  if(score >= 50) return "Mixed";
+  return "Weak";
 }
 function riskAssessment(ipo){
   const gmpPct = num(ipo.gmpPercentage) || (num(ipo.priceMax) > 0 ? (num(ipo.gmp) / num(ipo.priceMax)) * 100 : 0);
   const sub = num(ipo.subscription?.total);
-  const score = scoreIPO(ipo);
+  const score = overallScore(ipo);
 
   let riskScore = 55;
 
@@ -157,7 +187,7 @@ function App(){
       if(bad(i.name)) continue;
       const key = keyOf(i.name);
       if(!key) continue;
-      const scored = {...i, score:scoreIPO(i)};
+      const scored = {...i, score:overallScore(i), listingScore:listingScore(i), qualityScore:investmentQualityScore(i)};
       const old = map.get(key);
       if(!old || scored.source === "IPOMarkets" || scored.score > old.score){
         map.set(key, scored);
@@ -190,7 +220,7 @@ function App(){
       <div><b>{open.length}</b><span>Open IPOs</span></div>
       <div><b>{ranked.filter(i=>i.status==="upcoming").length}</b><span>Upcoming</span></div>
       <div><b>{best ? best.score : 0}/100</b><span>Best Score</span></div>
-      <div><b>{best ? recommendation(best.score,best) : "—"}</b><span>Top Recommendation</span></div>
+      <div><b>{best ? recommendation(best.score,best) : "—"}</b><span>Top Candidate</span></div>
     </section>
 
     {best && <section className="hero-card">
@@ -199,6 +229,10 @@ function App(){
         <h2>{best.name}</h2>
         <p>{best.sector} · {best.type === "sme" ? "SME" : "Mainboard"} · {best.symbol}</p>
         <div className="chips"><span>{recommendation(best.score,best)}</span><span>Risk: {riskAssessment(best).label} ({riskAssessment(best).score}/100)</span><span>GMP: {formatINR(best.gmp)}</span></div>
+        <div className="score-breakdown">
+          <div><span>Listing Gain Score</span><b>{best.listingScore}/100</b></div>
+          <div><span>Investment Quality</span><b>{best.qualityScore === null ? "Pending" : `${best.qualityScore}/100`}</b></div>
+        </div>
       </div>
       <div className="score-ring"><strong>{best.score}</strong><small>/100</small></div>
       <div className="disclaimer">Risk and ranking are based on current market signals such as GMP, subscription demand and SME/Mainboard type. They are informational only; GMP is unofficial and allotment/profit is never guaranteed.</div>
@@ -218,7 +252,11 @@ function App(){
       {filtered.map(ipo => <article className="ipo-card" key={ipo.id}>
         <div className="card-top"><span className={`badge ${ipo.type}`}>{ipo.type}</span><span className={`rec ${recommendation(ipo.score,ipo).replace(" ","-").toLowerCase()}`}>{recommendation(ipo.score,ipo)}</span></div>
         <h3>{ipo.name}</h3><p className="muted">{ipo.sector} · {ipo.symbol || "NSE/BSE"}</p>
-        <div className="big-score"><strong>{ipo.score}</strong><span>Investment Score</span></div>
+        <div className="big-score"><strong>{ipo.score}</strong><span>{ipo.qualityScore === null ? "Listing Opportunity Score" : "Overall Score"}</span></div>
+        <div className="mini-scores">
+          <div><span>Listing Gain</span><b>{ipo.listingScore}/100</b></div>
+          <div><span>Investment Quality</span><b>{ipo.qualityScore === null ? "Pending" : `${ipo.qualityScore}/100`}</b></div>
+        </div>
         <div className="metrics">
           <div><span>Price Band</span><b>₹{ipo.priceMin || "—"}–₹{ipo.priceMax || "—"}</b></div>
           <div><span>GMP</span><b>{formatINR(ipo.gmp)}</b></div>
@@ -239,9 +277,10 @@ function App(){
     </section>
 
     <section className="logic">
-      <h2>Ranking Logic</h2>
-      <p><b>50%</b> GMP strength · <b>35%</b> total subscription · <b>15%</b> Mainboard/SME risk adjustment. Free public-source data only; no API key required.</p>
-      <p>Score 80+ Strong Apply · 65–79 Apply · 50–64 Wait · below 50 Avoid. Risk is shown separately as Lower / Moderate / Higher using current demand, GMP and SME/Mainboard factors.</p>
+      <h2>Two-Score Ranking Model</h2>
+      <p><b>Listing Gain Score:</b> 45% GMP · 35% total subscription · 10% QIB demand when available · 10% Mainboard/SME adjustment.</p>
+      <p><b>Investment Quality Score:</b> verified revenue/profit growth, ROE/ROCE, debt and valuation from offer documents. If verified fundamentals are unavailable, the dashboard shows <b>Pending</b> instead of inventing a score.</p>
+      <p>When both are available, Overall Score = <b>45% Listing Gain + 55% Investment Quality</b>. 80+ Strong Candidate · 65–79 Good Candidate · 50–64 Watch · below 50 Higher Caution.</p>
     </section>
   </main>
 }
