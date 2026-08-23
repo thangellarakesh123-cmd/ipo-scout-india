@@ -275,7 +275,9 @@ function App(){
           <strong>{bidGuidance(ipo).title}</strong>
           <span>{bidGuidance(ipo).detail}</span>
         </div>
-        {ipo.fundamentals?.source && <div className="fund-source">Fundamentals: RHP/DRHP-derived public data via InvestorGain</div>}
+        {ipo.fundamentals?.source && <div className="fund-source">
+          Fundamentals source: <a href={ipo.fundamentals.source} target="_blank" rel="noreferrer">{ipo.fundamentals.sourceLabel || "Public IPO detail page"}</a>
+        </div>}
         <div className="card-foot">
           <span>Closes: {ipo.closeDate || "TBA"}</span>
           <span>Min. investment: {minInvestment(ipo) > 0 ? formatINR(minInvestment(ipo)) : "Not available"}</span>
@@ -289,6 +291,37 @@ function App(){
       <p><b>Investment Quality Score:</b> revenue/PAT growth, ROE, ROCE, debt/equity and valuation data extracted from public IPO financial highlights derived from RHP/DRHP disclosures. Valuation currently uses a conservative pre-IPO P/E heuristic; if reliable fundamentals are unavailable, the dashboard shows <b>Pending</b>.</p>
       <p>When both are available, Overall Score = <b>45% Listing Gain + 55% Investment Quality</b>. 80+ Strong Candidate · 65–79 Good Candidate · 50–64 Watch · below 50 Higher Caution.</p>
     </section>
+
+    <footer className="site-footer">
+      <div className="footer-grid">
+        <div>
+          <h3>Data & Source Notice</h3>
+          <p>
+            IPO Scout India compiles factual IPO data from publicly accessible sources and applies its own
+            scoring and analysis. GMP is unofficial and may change rapidly.
+          </p>
+        </div>
+        <div>
+          <h3>Source Attribution</h3>
+          <p>
+            Current live IPO/GMP data is sourced from public IPO tracking pages such as
+            <a href="https://ipomarkets.com/" target="_blank" rel="noreferrer"> IPOMarkets</a>
+            and, where used as a fallback,
+            <a href="https://www.investorgain.com/" target="_blank" rel="noreferrer"> InvestorGain</a>.
+            Regulatory and offer-document information may also be referenced from
+            <a href="https://www.sebi.gov.in/" target="_blank" rel="noreferrer"> SEBI</a> and
+            <a href="https://www.nseindia.com/" target="_blank" rel="noreferrer"> NSE India</a>.
+          </p>
+        </div>
+      </div>
+      <div className="legal-note">
+        <strong>Disclaimer:</strong> IPO Scout India is not affiliated with, sponsored by, or endorsed by any data source.
+        No article, logo, chart, or proprietary editorial content is reproduced. The dashboard uses factual data points,
+        public disclosures, and its own calculations. This information is for educational and informational purposes only
+        and is not investment advice. IPO investing involves risk, and neither GMP nor any dashboard score guarantees
+        allotment, listing gains, or future returns.
+      </div>
+    </footer>
   </main>
 }
 
