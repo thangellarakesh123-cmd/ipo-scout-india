@@ -504,39 +504,65 @@ function parseFundamentals(html, url){
 
 function parseIPOMarketsFundamentals(html, url){
   const $ = cheerio.load(html);
-  const body = clean($("body").text());
 
-  let roe = 0, roce = 0, debtEquity = 0, pe = 0;
-  let revenueGrowthPct = 0, profitGrowthPct = 0;
+  // IPOMarkets detail pages are server rendered enough that body + script text
+  // contains the financial labels. Keep both to survive Next.js layout changes.
+  let text = clean(
+    $("body").text() + " " +
+    $("script").map((_,s)=>$(s).html() || "").get().join(" ")
+  );
 
-  const roeMatch = body.match(/\bRoNW\s+([0-9]+(?:\.[0-9]+)?)%/i)
-    || body.match(/\bROE\s+([0-9]+(?:\.[0-9]+)?)%/i);
-  if(roeMatch) roe = Number(roeMatch[1]);
+  // Decode common escaped characters found in Next.js payloads.
+  text = text
+    .replace(/\\u20b9/gi, "₹")
+    .replace(/\\u00d7/gi, "×")
+    .replace(/\\u0025/gi, "%")
+    .replace(/\\n/g, " ")
+    .replace(/\\t/g, " ")
+    .replace(/\\\"/g, '"');
 
-  const roceMatch = body.match(/\bROCE\s+([0-9]+(?:\.[0-9]+)?)%/i);
-  if(roceMatch) roce = Number(roceMatch[1]);
+  function rx(re){
+    const m = text.match(re);
+    return m ? Number(String(m[1]).replace(/,/g,"")) : 0;
+  }
 
-  const deMatch = body.match(/Debt\s*\/\s*Equity\s+([0-9]+(?:\.[0-9]+)?)/i);
-  if(deMatch) debtEquity = Number(deMatch[1]);
+  // These exact labels are currently present on IPOMarkets IPO detail pages.
+  const roe =
+    rx(/Return on net worth\s+([0-9]+(?:\.[0-9]+)?)%/i) ||
+    rx(/RoNW\s+([0-9]+(?:\.[0-9]+)?)%/i) ||
+    rx(/ROE\s+([0-9]+(?:\.[0-9]+)?)%/i);
 
-  const peMatch = body.match(/\bP\/E\s+([0-9]+(?:\.[0-9]+)?)×/i)
-    || body.match(/\bP\/E\s+([0-9]+(?:\.[0-9]+)?)x/i);
-  if(peMatch) pe = Number(peMatch[1]);
+  const roce =
+    rx(/ROCE\s+([0-9]+(?:\.[0-9]+)?)%/i);
 
-  const revCagrMatch = body.match(/Revenue CAGR\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i);
-  if(revCagrMatch) revenueGrowthPct = Number(revCagrMatch[1]);
+  const debtEquity =
+    rx(/Debt\s*\/\s*Equity\s+([0-9]+(?:\.[0-9]+)?)/i);
 
-  const patGrowthMatch = body.match(/PAT growth\s*\(YoY\)\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i);
-  if(patGrowthMatch) profitGrowthPct = Number(patGrowthMatch[1]);
+  const pe =
+    rx(/P\/E at issue price\s+([0-9]+(?:\.[0-9]+)?)\s*[×x]/i) ||
+    rx(/P\/E\s+([0-9]+(?:\.[0-9]+)?)\s*[×x]/i);
 
-  // Fallback: parse the financials table and calculate latest FY YoY.
+  let revenueGrowthPct =
+    rx(/Revenue CAGR\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i);
+
+  let profitGrowthPct =
+    rx(/PAT growth\s*\(YoY\)\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i) ||
+    rx(/PAT growth\s*\+?(-?[0-9]+(?:\.[0-9]+)?)%/i);
+
+  // Financial table fallback: calculate growth from the latest two FY rows.
   if(!revenueGrowthPct || !profitGrowthPct){
     $("table").each((_,table)=>{
       const rows = $(table).find("tr").toArray();
-      const header = rows[0] ? $(rows[0]).find("th,td").map((_,td)=>clean($(td).text())).get() : [];
-      if(!header.some(x=>/^Period$/i.test(x)) || !header.some(x=>/^Revenue$/i.test(x)) || !header.some(x=>/^PAT$/i.test(x))) return;
+      const header = rows[0]
+        ? $(rows[0]).find("th,td").map((_,td)=>clean($(td).text())).get()
+        : [];
 
-      const dataRows = rows.slice(1).map(row => $(row).find("th,td").map((_,td)=>clean($(td).text())).get())
+      if(!header.some(x=>/^Period$/i.test(x)) ||
+         !header.some(x=>/^Revenue$/i.test(x)) ||
+         !header.some(x=>/^PAT$/i.test(x))) return;
+
+      const dataRows = rows.slice(1)
+        .map(row => $(row).find("th,td").map((_,td)=>clean($(td).text())).get())
         .filter(cells => cells.length >= 3 && /FY20\d{2}/i.test(cells[0]));
 
       if(dataRows.length >= 2){
@@ -544,11 +570,37 @@ function parseIPOMarketsFundamentals(html, url){
         const prevRev = numberFrom(dataRows[1][1]);
         const latestPat = numberFrom(dataRows[0][2]);
         const prevPat = numberFrom(dataRows[1][2]);
-        if(!revenueGrowthPct && prevRev) revenueGrowthPct = ((latestRev-prevRev)/Math.abs(prevRev))*100;
-        if(!profitGrowthPct && prevPat) profitGrowthPct = ((latestPat-prevPat)/Math.abs(prevPat))*100;
+
+        if(!revenueGrowthPct && prevRev)
+          revenueGrowthPct = ((latestRev-prevRev)/Math.abs(prevRev))*100;
+
+        if(!profitGrowthPct && prevPat)
+          profitGrowthPct = ((latestPat-prevPat)/Math.abs(prevPat))*100;
       }
     });
   }
+
+  // Lot/minimum investment.
+  let lotSize = 0;
+  let minInvestment = 0;
+
+  const lot = text.match(/Retail\s*\(min\)\s*\|?\s*1\s*\|?\s*([0-9,]+)\s*\|?\s*₹\s*([0-9,]+)/i)
+    || text.match(/One lot is\s*([0-9,]+)\s*shares.*?₹\s*([0-9,]+)/i)
+    || text.match(/Lot\s*\/\s*min\s*([0-9,]+)\s*sh\s*₹\s*([0-9,]+)/i);
+
+  if(lot){
+    lotSize = numberFrom(lot[1]);
+    minInvestment = numberFrom(lot[2]);
+  }
+
+  const issueSize =
+    rx(/Issue size\s+₹\s*([0-9,.]+)\s*Cr/i);
+
+  // Subscription category values when live.
+  const qib = rx(/QIB\s+([0-9]+(?:\.[0-9]+)?)\s*[×x]/i);
+  const nii = rx(/NII\s+([0-9]+(?:\.[0-9]+)?)\s*[×x]/i);
+  const retail = rx(/Retail\s+([0-9]+(?:\.[0-9]+)?)\s*[×x]/i);
+  const total = rx(/Total\s+([0-9]+(?:\.[0-9]+)?)\s*[×x]/i);
 
   const metricCount = [
     revenueGrowthPct !== 0,
@@ -571,7 +623,23 @@ function parseIPOMarketsFundamentals(html, url){
     valuationScore: valuationScoreFromPE(pe),
     valuationMethod: pe ? "Absolute issue P/E heuristic" : "Neutral fallback; P/E unavailable",
     source: url,
-    sourceLabel: "IPOMarkets financials re-derived from public offer documents"
+    sourceLabel: "IPOMarkets public RHP/DRHP-derived financial data",
+    _detail: {
+      lotSize,
+      minInvestment,
+      issueSize,
+      subscription:{qib,nii,retail,total}
+    },
+    _debug: {
+      metricCount,
+      found: {
+        revenueGrowthPct: revenueGrowthPct !== 0,
+        profitGrowthPct: profitGrowthPct !== 0,
+        roe: roe > 0,
+        roce: roce > 0,
+        pe: pe > 0
+      }
+    }
   };
 }
 
@@ -579,32 +647,59 @@ async function enrichFundamentals(items, errors, investorGainHomeHtml){
   const investorLinks = discoverInvestorGainLinks(investorGainHomeHtml || "");
 
   return await Promise.all(items.map(async item => {
-    // Prefer IPOMarkets detail pages because the main live feed already comes
-    // from IPOMarkets and those detail pages expose financials in structured HTML.
+    let enriched = {...item};
+
+    // Primary: same IPOMarkets detail page already linked from the live IPO row.
     if(item.detailUrl && /ipomarkets\.com\/ipo\//i.test(item.detailUrl)){
       try{
         const html = await fetchPage(item.detailUrl);
-        const fundamentals = parseIPOMarketsFundamentals(html, item.detailUrl);
-        if(fundamentals.verified) return {...item, fundamentals};
+        const parsed = parseIPOMarketsFundamentals(html, item.detailUrl);
+
+        const d = parsed._detail || {};
+        if(d.lotSize) enriched.lotSize = d.lotSize;
+        if(d.minInvestment) enriched.minInvestment = d.minInvestment;
+        if(d.issueSize) enriched.issueSize = d.issueSize;
+
+        if(d.subscription){
+          enriched.subscription = {
+            qib: d.subscription.qib || enriched.subscription?.qib || 0,
+            nii: d.subscription.nii || enriched.subscription?.nii || 0,
+            retail: d.subscription.retail || enriched.subscription?.retail || 0,
+            total: d.subscription.total || enriched.subscription?.total || 0
+          };
+        }
+
+        const debug = parsed._debug;
+        delete parsed._detail;
+        delete parsed._debug;
+
+        if(parsed.verified){
+          return {...enriched, fundamentals:parsed};
+        }
+
+        errors.push(
+          `${item.name} fundamentals parsed ${debug?.metricCount || 0}/5 core metrics ` +
+          `(rev=${debug?.found?.revenueGrowthPct||false}, pat=${debug?.found?.profitGrowthPct||false}, ` +
+          `roe=${debug?.found?.roe||false}, roce=${debug?.found?.roce||false}, pe=${debug?.found?.pe||false})`
+        );
       }catch(e){
         errors.push(`${item.name} IPOMarkets fundamentals: ${e.message}`);
       }
     }
 
-    // Fallback to InvestorGain only if a matching detail page can be found.
+    // Secondary fallback: InvestorGain public detail page.
     const investorUrl = bestInvestorGainLink(item.name, investorLinks);
     if(investorUrl){
       try{
         const html = await fetchPage(investorUrl);
         const fundamentals = parseFundamentals(html, investorUrl);
-        if(fundamentals.verified) return {...item, fundamentals};
+        if(fundamentals.verified) return {...enriched, fundamentals};
       }catch(e){
         errors.push(`${item.name} InvestorGain fundamentals: ${e.message}`);
       }
     }
 
-    errors.push(`${item.name} fundamentals: no verified detail metrics parsed`);
-    return {...item, fundamentals:null};
+    return {...enriched, fundamentals:null};
   }));
 }
 
