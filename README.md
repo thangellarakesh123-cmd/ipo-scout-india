@@ -1,30 +1,31 @@
-# IPO Scout India — v2 parser fix
+# IPO Scout India — Fundamentals Fix v6.2
 
-This version fixes the issue where status text such as **"Opens in 2d"** was incorrectly displayed as the IPO company name.
+This fixes `Investment Quality: Pending` by using each IPO's IPOMarkets detail page as the primary fundamentals source.
 
-## What changed
-- Company names are now extracted from the IPO detail link in each table row.
-- Status cells such as `Closes in 2d` and `Opens in 3d` are parsed separately.
-- Added frontend validation so status text can never be rendered as a company name.
-- IPOMarkets remains the primary public source.
-- InvestorGain remains a fallback.
-- No API key is required.
+## Why this should work better
+The live dashboard already gets current IPO rows from IPOMarkets. Those rows link to IPO detail pages that expose:
+- Revenue CAGR / financials
+- PAT growth
+- RoNW / ROE
+- ROCE
+- Debt / Equity
+- P/E
+- Lot size and other issue details
 
-## Upload these files to GitHub
-Replace:
+The backend now stores that detail URL and fetches the same company's fundamentals from it.
+
+InvestorGain remains only a fallback.
+
+## Upload to GitHub
+Replace only:
 - `api/ipos.js`
-- `src/main.jsx`
 
-You may upload the full project if that's easier.
+Keep your current `src/main.jsx` and `src/styles.css`.
 
-After the GitHub commit, Vercel should automatically redeploy.
+Then redeploy Vercel.
 
-## Test
-Open:
+Test:
 https://ipo-scout-india.vercel.app/api/ipos
 
-Each item should contain a real `"name"` such as:
-- `"Tempsens Instruments (India)"`
-- `"Augmont Enterprises"`
-
-Then open the main dashboard.
+Look for:
+`"fundamentals":{"verified":true,...}`
