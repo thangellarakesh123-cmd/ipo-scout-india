@@ -1,50 +1,28 @@
-# IPO Scout India — Free Public Sources Version
+# IPO Scout India — Auto Fundamentals v6
 
-This build does **not require any API key**.
+This version keeps the working live/free IPO feed and automatically enriches IPO cards with public financial data when an InvestorGain IPO detail page is available.
 
-It uses a Vercel serverless function (`api/ipos.js`) to read publicly accessible IPO tracking pages and extract:
-- Open/upcoming IPOs
-- GMP / GMP %
-- Total subscription when available
-- Price band
-- Dates
-- Mainboard vs SME
+## New
+- Revenue growth
+- PAT growth
+- ROE
+- ROCE
+- Debt/Equity
+- Pre-IPO P/E
+- Automatic Investment Quality Score
+- Overall Score = 45% Listing Gain + 55% Investment Quality
 
-Primary sources:
-- InvestorGain: https://investorgain.in/
-- IPOMarkets: https://ipomarkets.com/
+The financial highlights are taken from InvestorGain IPO detail pages, which publish restated financial/KPI data derived from IPO RHP/DRHP disclosures.
 
-The dashboard refreshes manually with the Refresh button and automatically every 5 minutes.
+If the detail page cannot be found or parsed reliably, Investment Quality remains `Pending` rather than being fabricated.
 
-## Ranking
-Because free public pages do not always expose QIB/Retail category splits consistently, the score is:
-- 50% GMP strength
-- 35% total subscription
-- 15% Mainboard/SME risk adjustment
+## Valuation
+The current valuation sub-score is based on an absolute pre-IPO P/E heuristic. It is deliberately conservative and is not a full peer-relative valuation.
 
-## GitHub files
-Upload/replace:
+## Upload to GitHub
+Replace:
 - `api/ipos.js`
 - `src/main.jsx`
 - `src/styles.css`
-- `package.json`
-- `.env.example`
-- `README.md`
-- `vercel.json`
 
-## Vercel
-No Environment Variables are needed.
-
-After committing to GitHub, Vercel should redeploy automatically. If not:
-Deployments → latest → Redeploy.
-
-Test:
-`https://ipo-scout-india.vercel.app/api/ipos`
-
-Successful response starts with:
-`{"ok":true,...}`
-
-## Important
-This uses public webpage scraping, not an official API. It may break if a source changes its HTML or blocks automated requests. The server uses two sources so one can act as a fallback.
-
-GMP is unofficial and is not a guarantee of listing gains. The ranking is informational, not financial advice.
+No API key is required.
