@@ -1,31 +1,50 @@
-# IPO Scout India — Fundamentals Fix v6.2
+# IPO Scout India — Free Public Sources Version
 
-This fixes `Investment Quality: Pending` by using each IPO's IPOMarkets detail page as the primary fundamentals source.
+This build does **not require any API key**.
 
-## Why this should work better
-The live dashboard already gets current IPO rows from IPOMarkets. Those rows link to IPO detail pages that expose:
-- Revenue CAGR / financials
-- PAT growth
-- RoNW / ROE
-- ROCE
-- Debt / Equity
-- P/E
-- Lot size and other issue details
+It uses a Vercel serverless function (`api/ipos.js`) to read publicly accessible IPO tracking pages and extract:
+- Open/upcoming IPOs
+- GMP / GMP %
+- Total subscription when available
+- Price band
+- Dates
+- Mainboard vs SME
 
-The backend now stores that detail URL and fetches the same company's fundamentals from it.
+Primary sources:
+- InvestorGain: https://investorgain.in/
+- IPOMarkets: https://ipomarkets.com/
 
-InvestorGain remains only a fallback.
+The dashboard refreshes manually with the Refresh button and automatically every 5 minutes.
 
-## Upload to GitHub
-Replace only:
+## Ranking
+Because free public pages do not always expose QIB/Retail category splits consistently, the score is:
+- 50% GMP strength
+- 35% total subscription
+- 15% Mainboard/SME risk adjustment
+
+## GitHub files
+Upload/replace:
 - `api/ipos.js`
+- `src/main.jsx`
+- `src/styles.css`
+- `package.json`
+- `.env.example`
+- `README.md`
+- `vercel.json`
 
-Keep your current `src/main.jsx` and `src/styles.css`.
+## Vercel
+No Environment Variables are needed.
 
-Then redeploy Vercel.
+After committing to GitHub, Vercel should redeploy automatically. If not:
+Deployments → latest → Redeploy.
 
 Test:
-https://ipo-scout-india.vercel.app/api/ipos
+`https://ipo-scout-india.vercel.app/api/ipos`
 
-Look for:
-`"fundamentals":{"verified":true,...}`
+Successful response starts with:
+`{"ok":true,...}`
+
+## Important
+This uses public webpage scraping, not an official API. It may break if a source changes its HTML or blocks automated requests. The server uses two sources so one can act as a fallback.
+
+GMP is unofficial and is not a guarantee of listing gains. The ranking is informational, not financial advice.
