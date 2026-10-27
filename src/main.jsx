@@ -14,120 +14,33 @@ function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function formatX(v){ return `${num(v).toFixed(2)}x`; }
 function formatINR(v){ return new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(num(v)); }
 
-function listingScore(ipo){
+function scoreIPO(ipo){
   const p = Math.max(num(ipo.priceMax), 1);
-  const gmpPct = num(ipo.gmpPercentage) || (num(ipo.gmp) / p * 100);
+  const gmpPct = num(ipo.gmp) / p * 100;
+  const gmpScore = clamp(gmpPct / 25 * 35, 0, 35);
   const total = num(ipo.subscription?.total);
+  const demandScore = clamp(Math.log10(total + 1) / Math.log10(31) * 30, 0, 30);
   const qib = num(ipo.subscription?.qib);
-
-  const gmpScore = clamp(gmpPct / 30 * 45, 0, 45);
-  const demandScore = clamp(Math.log10(total + 1) / Math.log10(51) * 35, 0, 35);
-  const qibScore = qib > 0 ? clamp(Math.log10(qib + 1) / Math.log10(31) * 10, 0, 10) : 5;
-  const boardScore = ipo.type === "mainboard" ? 10 : 5;
+  const qibScore = clamp(Math.log10(qib + 1) / Math.log10(31) * 20, 0, 20);
+  const issue = num(ipo.issueSize);
+  const issueScore = clamp((1 - Math.min(issue, 5000)/5000) * 10, 0, 10);
+  const typeScore = ipo.type === "mainboard" ? 5 : 2;
   const freshness = ipo.status === "open" ? 1 : 0.55;
-  return Math.round(clamp((gmpScore + demandScore + qibScore + boardScore) * freshness, 0, 100));
-}
-
-function investmentQualityScore(ipo){
-  const f = ipo.fundamentals;
-  if(!f || !f.verified) return null;
-
-  const revenue = clamp((num(f.revenueGrowthPct) + 5) / 35 * 20, 0, 20);
-  const profit = clamp((num(f.profitGrowthPct) + 5) / 45 * 20, 0, 20);
-  const roe = clamp(num(f.roePct) / 25 * 15, 0, 15);
-  const roce = clamp(num(f.rocePct) / 25 * 15, 0, 15);
-  const debt = clamp((1.5 - num(f.debtToEquity)) / 1.5 * 10, 0, 10);
-  const valuation = clamp(num(f.valuationScore), 0, 20);
-
-  return Math.round(clamp(revenue + profit + roe + roce + debt + valuation,0,100));
-}
-
-function overallScore(ipo){
-  const listing = listingScore(ipo);
-  const quality = investmentQualityScore(ipo);
-  // Do not pretend missing fundamentals are known.
-  return quality === null ? listing : Math.round(listing * 0.45 + quality * 0.55);
+  return Math.round(clamp((gmpScore + demandScore + qibScore + issueScore + typeScore) * freshness, 0, 100));
 }
 function recommendation(score, ipo){
   if(ipo.status !== "open") return "Upcoming";
-  if(score >= 80) return "Strong Candidate";
-  if(score >= 65) return "Good Candidate";
-  if(score >= 50) return "Watch";
-  return "Higher Caution";
+  if(score >= 80) return "Strong Apply";
+  if(score >= 65) return "Apply";
+  if(score >= 50) return "Wait";
+  return "Avoid";
 }
-
-function qualityLabel(score){
-  if(score === null || score === undefined) return "Pending verified fundamentals";
-  if(score >= 80) return "Strong";
-  if(score >= 65) return "Good";
-  if(score >= 50) return "Mixed";
-  return "Weak";
-}
-function riskAssessment(ipo){
-  const gmpPct = num(ipo.gmpPercentage) || (num(ipo.priceMax) > 0 ? (num(ipo.gmp) / num(ipo.priceMax)) * 100 : 0);
-  const sub = num(ipo.subscription?.total);
-  const score = overallScore(ipo);
-
-  let riskScore = 55;
-
-  // Mainboard IPOs usually have lower liquidity/lot-size risk than SME IPOs.
-  if(ipo.type === "mainboard") riskScore -= 12;
-  else riskScore += 18;
-
-  // Strong demand and positive GMP reduce the dashboard's market-signal risk.
-  if(sub >= 10) riskScore -= 14;
-  else if(sub >= 3) riskScore -= 8;
-  else if(sub > 0 && sub < 1) riskScore += 10;
-
-  if(gmpPct >= 20) riskScore -= 12;
-  else if(gmpPct >= 8) riskScore -= 6;
-  else if(gmpPct <= 0) riskScore += 10;
-
-  if(score >= 80) riskScore -= 8;
-  else if(score < 50) riskScore += 10;
-
-  riskScore = clamp(Math.round(riskScore), 15, 95);
-
-  if(riskScore <= 35) return {label:"Lower", score:riskScore, note:"Stronger current demand/GMP signals"};
-  if(riskScore <= 60) return {label:"Moderate", score:riskScore, note:"Mixed current market signals"};
-  return {label:"Higher", score:riskScore, note:"Weaker signals or SME/liquidity risk"};
-}
-
-function minInvestment(ipo){
-  const explicit = num(ipo.minInvestment);
-  if(explicit > 0) return explicit;
-  const lot = num(ipo.lotSize);
-  const price = num(ipo.priceMax);
-  return lot > 0 && price > 0 ? lot * price : 0;
-}
-
-function bidGuidance(ipo){
-  if(ipo.status !== "open"){
-    return {
-      title:"Wait for bidding to open",
-      detail:"The IPO is not open yet. Review the final price band and lot size once bidding starts."
-    };
-  }
-
-  const lot = num(ipo.lotSize);
-  const price = num(ipo.priceMax);
-  const min = minInvestment(ipo);
-
-  if(ipo.type === "mainboard"){
-    return {
-      title:"Retail: bid at Cut-off",
-      detail: lot > 0 && min > 0
-        ? `For a retail application, 1 lot = ${lot} shares (about ${formatINR(min)} at the upper price). Applying at Cut-off keeps your bid valid across the final discovered price. If the retail category is heavily oversubscribed, applying for extra lots generally does not multiply your allotment odds like separate PAN applications would; use only one application per PAN.`
-        : "For a retail application, choose Cut-off price where your broker supports it and submit only one application per PAN. Lot size is not available from the current free source, so the exact minimum amount cannot be calculated yet."
-    };
-  }
-
-  return {
-    title:"SME: check minimum lots carefully",
-    detail: lot > 0 && min > 0
-      ? `SME applications can require larger lot commitments. Current minimum shown by available data is about ${formatINR(min)} for ${lot} shares. Use the permitted price/bid settings shown by your broker and avoid multiple applications using the same PAN.`
-      : "SME IPOs often require a much larger minimum application. Confirm the mandatory lot quantity and amount in your broker before applying."
-  };
+function risk(ipo){
+  let r = 50;
+  if(ipo.type === "sme") r += 15;
+  if(num(ipo.issueSize) < 100) r += 10;
+  if(num(ipo.subscription?.qib) < 1) r += 10;
+  return r >= 70 ? "High" : r >= 55 ? "Medium" : "Low";
 }
 
 async function fetchIPOData(){
@@ -168,31 +81,7 @@ function App(){
 
   useEffect(()=>{ refresh(); const id=setInterval(refresh, 5*60*1000); return ()=>clearInterval(id); },[]);
 
-  const ranked = useMemo(()=>{
-    const cleanName = (name="") => String(name).replace(/\s+/g," ").trim();
-    const keyOf = (name="") => cleanName(name)
-      .toLowerCase()
-      .replace(/\b(limited|ltd|india|private|pvt|ipo|mainboard|sme)\b/g," ")
-      .replace(/[^a-z0-9]/g,"");
-
-    const bad = (name="") =>
-      !cleanName(name) ||
-      /How GMP Works|Refresh cycle|IPOs tracked|Open right now/i.test(name) ||
-      /^(opens?|closes?|open|upcoming|listed|allotted|view all)/i.test(cleanName(name));
-
-    const map = new Map();
-    for(const i of ipos){
-      if(bad(i.name)) continue;
-      const key = keyOf(i.name);
-      if(!key) continue;
-      const scored = {...i, score:overallScore(i), listingScore:listingScore(i), qualityScore:investmentQualityScore(i)};
-      const old = map.get(key);
-      if(!old || scored.source === "IPOMarkets" || scored.score > old.score){
-        map.set(key, scored);
-      }
-    }
-    return [...map.values()].sort((a,b)=>b.score-a.score);
-  },[ipos]);
+  const ranked = useMemo(()=>ipos.map(i=>({...i, score:scoreIPO(i)})).sort((a,b)=>b.score-a.score),[ipos]);
   const open = ranked.filter(i=>i.status==="open");
   const best = open[0] || ranked[0];
   const filtered = ranked.filter(i => {
@@ -218,7 +107,7 @@ function App(){
       <div><b>{open.length}</b><span>Open IPOs</span></div>
       <div><b>{ranked.filter(i=>i.status==="upcoming").length}</b><span>Upcoming</span></div>
       <div><b>{best ? best.score : 0}/100</b><span>Best Score</span></div>
-      <div><b>{best ? recommendation(best.score,best) : "—"}</b><span>Top Candidate</span></div>
+      <div><b>{best ? recommendation(best.score,best) : "—"}</b><span>Top Recommendation</span></div>
     </section>
 
     {best && <section className="hero-card">
@@ -226,14 +115,10 @@ function App(){
         <p className="eyebrow">BEST IPO TO WATCH / APPLY</p>
         <h2>{best.name}</h2>
         <p>{best.sector} · {best.type === "sme" ? "SME" : "Mainboard"} · {best.symbol}</p>
-        <div className="chips"><span>{recommendation(best.score,best)}</span><span>Risk: {riskAssessment(best).label} ({riskAssessment(best).score}/100)</span><span>GMP: {formatINR(best.gmp)}</span></div>
-        <div className="score-breakdown">
-          <div><span>Listing Gain Score</span><b>{best.listingScore}/100</b></div>
-          <div><span>Investment Quality</span><b>{best.qualityScore === null ? "Pending" : `${best.qualityScore}/100`}</b></div>
-        </div>
+        <div className="chips"><span>{recommendation(best.score,best)}</span><span>Risk: {risk(best)}</span><span>GMP: {formatINR(best.gmp)}</span></div>
       </div>
       <div className="score-ring"><strong>{best.score}</strong><small>/100</small></div>
-      <div className="disclaimer">Risk and ranking are based on current market signals such as GMP, subscription demand and SME/Mainboard type. They are informational only; GMP is unofficial and allotment/profit is never guaranteed.</div>
+      <div className="disclaimer">Ranking is algorithmic and informational only. IPO investing involves risk and GMP is unofficial.</div>
     </section>}
 
     <section className="toolbar">
@@ -250,78 +135,27 @@ function App(){
       {filtered.map(ipo => <article className="ipo-card" key={ipo.id}>
         <div className="card-top"><span className={`badge ${ipo.type}`}>{ipo.type}</span><span className={`rec ${recommendation(ipo.score,ipo).replace(" ","-").toLowerCase()}`}>{recommendation(ipo.score,ipo)}</span></div>
         <h3>{ipo.name}</h3><p className="muted">{ipo.sector} · {ipo.symbol || "NSE/BSE"}</p>
-        <div className="big-score"><strong>{ipo.score}</strong><span>{ipo.qualityScore === null ? "Listing Opportunity Score" : "Overall Score"}</span></div>
-        <div className="mini-scores">
-          <div><span>Listing Gain</span><b>{ipo.listingScore}/100</b></div>
-          <div><span>Investment Quality</span><b>{ipo.qualityScore === null ? "Pending" : `${ipo.qualityScore}/100`}</b></div>
-        </div>
-        {ipo.fundamentals?.verified && <div className="fundamentals">
-          <div><span>Revenue growth</span><b>{num(ipo.fundamentals.revenueGrowthPct).toFixed(1)}%</b></div>
-          <div><span>PAT growth</span><b>{num(ipo.fundamentals.profitGrowthPct).toFixed(1)}%</b></div>
-          <div><span>ROE</span><b>{num(ipo.fundamentals.roePct).toFixed(1)}%</b></div>
-          <div><span>ROCE</span><b>{num(ipo.fundamentals.rocePct).toFixed(1)}%</b></div>
-          <div><span>Debt/Equity</span><b>{num(ipo.fundamentals.debtToEquity).toFixed(2)}</b></div>
-          <div><span>Pre-IPO P/E</span><b>{ipo.fundamentals.preIPOPE ? `${num(ipo.fundamentals.preIPOPE).toFixed(1)}x` : "N/A"}</b></div>
-        </div>}
+        <div className="big-score"><strong>{ipo.score}</strong><span>Investment Score</span></div>
         <div className="metrics">
           <div><span>Price Band</span><b>₹{ipo.priceMin || "—"}–₹{ipo.priceMax || "—"}</b></div>
           <div><span>GMP</span><b>{formatINR(ipo.gmp)}</b></div>
           <div><span>Total Sub.</span><b>{formatX(ipo.subscription.total)}</b></div>
           <div><span>GMP %</span><b>{num(ipo.gmpPercentage).toFixed(2)}%</b></div>
           <div><span>Source</span><b>{ipo.source || "Public web"}</b></div>
-          <div><span>Risk</span><b>{riskAssessment(ipo).label} ({riskAssessment(ipo).score}/100)</b></div>
+          <div><span>Risk</span><b>{risk(ipo)}</b></div>
         </div>
-        <div className="bid-guide">
-          <strong>{bidGuidance(ipo).title}</strong>
-          <span>{bidGuidance(ipo).detail}</span>
-        </div>
-        {ipo.fundamentals?.source && <div className="fund-source">
-          Fundamentals source: <a href={ipo.fundamentals.source} target="_blank" rel="noreferrer">{ipo.fundamentals.sourceLabel || "Public IPO detail page"}</a>
-        </div>}
         <div className="card-foot">
           <span>Closes: {ipo.closeDate || "TBA"}</span>
-          <span>Min. investment: {minInvestment(ipo) > 0 ? formatINR(minInvestment(ipo)) : "Not available"}</span>
+          <span>Min. investment: {ipo.lotSize && ipo.priceMax ? formatINR(ipo.lotSize*ipo.priceMax) : "TBA"}</span>
         </div>
       </article>)}
     </section>
 
     <section className="logic">
-      <h2>Two-Score Ranking Model</h2>
-      <p><b>Listing Gain Score:</b> 45% GMP · 35% total subscription · 10% QIB demand when available · 10% Mainboard/SME adjustment.</p>
-      <p><b>Investment Quality Score:</b> revenue/PAT growth, ROE, ROCE, debt/equity and valuation data extracted from public IPO financial highlights derived from RHP/DRHP disclosures. Valuation currently uses a conservative pre-IPO P/E heuristic; if reliable fundamentals are unavailable, the dashboard shows <b>Pending</b>.</p>
-      <p>When both are available, Overall Score = <b>45% Listing Gain + 55% Investment Quality</b>. 80+ Strong Candidate · 65–79 Good Candidate · 50–64 Watch · below 50 Higher Caution.</p>
+      <h2>Ranking Logic</h2>
+      <p><b>50%</b> GMP strength · <b>35%</b> total subscription · <b>15%</b> Mainboard/SME risk adjustment. Free public-source data only; no API key required.</p>
+      <p>Score 80+ Strong Apply · 65–79 Apply · 50–64 Wait · below 50 Avoid.</p>
     </section>
-
-    <footer className="site-footer">
-      <div className="footer-grid">
-        <div>
-          <h3>Data & Source Notice</h3>
-          <p>
-            IPO Scout India compiles factual IPO data from publicly accessible sources and applies its own
-            scoring and analysis. GMP is unofficial and may change rapidly.
-          </p>
-        </div>
-        <div>
-          <h3>Source Attribution</h3>
-          <p>
-            Current live IPO/GMP data is sourced from public IPO tracking pages such as
-            <a href="https://ipomarkets.com/" target="_blank" rel="noreferrer"> IPOMarkets</a>
-            and, where used as a fallback,
-            <a href="https://www.investorgain.com/" target="_blank" rel="noreferrer"> InvestorGain</a>.
-            Regulatory and offer-document information may also be referenced from
-            <a href="https://www.sebi.gov.in/" target="_blank" rel="noreferrer"> SEBI</a> and
-            <a href="https://www.nseindia.com/" target="_blank" rel="noreferrer"> NSE India</a>.
-          </p>
-        </div>
-      </div>
-      <div className="legal-note">
-        <strong>Disclaimer:</strong> IPO Scout India is not affiliated with, sponsored by, or endorsed by any data source.
-        No article, logo, chart, or proprietary editorial content is reproduced. The dashboard uses factual data points,
-        public disclosures, and its own calculations. This information is for educational and informational purposes only
-        and is not investment advice. IPO investing involves risk, and neither GMP nor any dashboard score guarantees
-        allotment, listing gains, or future returns.
-      </div>
-    </footer>
   </main>
 }
 

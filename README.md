@@ -1,22 +1,50 @@
-# IPO Scout India — Working Live Version + Dedup Fix
+# IPO Scout India — Free Public Sources Version
 
-This version keeps the earlier working live-data logic and only fixes the bad duplicate cards.
+This build does **not require any API key**.
 
-## Fixed
-- Removes junk cards such as `How GMP Works ... Tempsens Instruments (India)`
-- Deduplicates the same IPO across InvestorGain and IPOMarkets
-- Prefers the cleaner IPOMarkets record when both sources contain the same IPO
-- Fills missing fields from the alternate source where useful
-- Adds a sanity check for impossible GMP values
-- Keeps the same public/free data sources and no API key requirement
+It uses a Vercel serverless function (`api/ipos.js`) to read publicly accessible IPO tracking pages and extract:
+- Open/upcoming IPOs
+- GMP / GMP %
+- Total subscription when available
+- Price band
+- Dates
+- Mainboard vs SME
 
-## Replace only these files in GitHub
+Primary sources:
+- InvestorGain: https://investorgain.in/
+- IPOMarkets: https://ipomarkets.com/
+
+The dashboard refreshes manually with the Refresh button and automatically every 5 minutes.
+
+## Ranking
+Because free public pages do not always expose QIB/Retail category splits consistently, the score is:
+- 50% GMP strength
+- 35% total subscription
+- 15% Mainboard/SME risk adjustment
+
+## GitHub files
+Upload/replace:
 - `api/ipos.js`
 - `src/main.jsx`
+- `src/styles.css`
+- `package.json`
+- `.env.example`
+- `README.md`
+- `vercel.json`
 
-After committing, let Vercel redeploy automatically.
+## Vercel
+No Environment Variables are needed.
 
-Then test:
-https://ipo-scout-india.vercel.app/api/ipos
+After committing to GitHub, Vercel should redeploy automatically. If not:
+Deployments → latest → Redeploy.
 
-You should see each IPO only once.
+Test:
+`https://ipo-scout-india.vercel.app/api/ipos`
+
+Successful response starts with:
+`{"ok":true,...}`
+
+## Important
+This uses public webpage scraping, not an official API. It may break if a source changes its HTML or blocks automated requests. The server uses two sources so one can act as a fallback.
+
+GMP is unofficial and is not a guarantee of listing gains. The ranking is informational, not financial advice.
