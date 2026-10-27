@@ -1,50 +1,11 @@
-# IPO Scout India — Free Public Sources Version
+# IPO Scout India — Live Public Data Fix v8
 
-This build does **not require any API key**.
+This version keeps the existing dashboard, ranking model, risk labels, and bid guidance. It adds a primary structured public IPO feed from Xflot (no API key), retaining IPOMarkets/InvestorGain HTML parsing as a fallback.
 
-It uses a Vercel serverless function (`api/ipos.js`) to read publicly accessible IPO tracking pages and extract:
-- Open/upcoming IPOs
-- GMP / GMP %
-- Total subscription when available
-- Price band
-- Dates
-- Mainboard vs SME
+- Xflot API documentation: https://www.xflot.com/api-docs
+- Attribution is included in the UI as required by that feed's published terms.
+- The API is polled no more than once per minute (server cache is 60 seconds; UI refresh is 5 minutes).
+- If live feeds fail, the UI shows an explicit unavailable message instead of fictional demo IPOs.
+- GMP is unofficial and may be delayed; always verify prices, lot sizes and dates before applying.
 
-Primary sources:
-- InvestorGain: https://investorgain.in/
-- IPOMarkets: https://ipomarkets.com/
-
-The dashboard refreshes manually with the Refresh button and automatically every 5 minutes.
-
-## Ranking
-Because free public pages do not always expose QIB/Retail category splits consistently, the score is:
-- 50% GMP strength
-- 35% total subscription
-- 15% Mainboard/SME risk adjustment
-
-## GitHub files
-Upload/replace:
-- `api/ipos.js`
-- `src/main.jsx`
-- `src/styles.css`
-- `package.json`
-- `.env.example`
-- `README.md`
-- `vercel.json`
-
-## Vercel
-No Environment Variables are needed.
-
-After committing to GitHub, Vercel should redeploy automatically. If not:
-Deployments → latest → Redeploy.
-
-Test:
-`https://ipo-scout-india.vercel.app/api/ipos`
-
-Successful response starts with:
-`{"ok":true,...}`
-
-## Important
-This uses public webpage scraping, not an official API. It may break if a source changes its HTML or blocks automated requests. The server uses two sources so one can act as a fallback.
-
-GMP is unofficial and is not a guarantee of listing gains. The ranking is informational, not financial advice.
+Deploy to Vercel from this project. No API key or environment variable is required.
