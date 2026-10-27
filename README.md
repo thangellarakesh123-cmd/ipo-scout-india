@@ -1,28 +1,31 @@
-# IPO Scout India — Auto Fundamentals v6
+# IPO Scout India — Fundamentals Fix v6.2
 
-This version keeps the working live/free IPO feed and automatically enriches IPO cards with public financial data when an InvestorGain IPO detail page is available.
+This fixes `Investment Quality: Pending` by using each IPO's IPOMarkets detail page as the primary fundamentals source.
 
-## New
-- Revenue growth
+## Why this should work better
+The live dashboard already gets current IPO rows from IPOMarkets. Those rows link to IPO detail pages that expose:
+- Revenue CAGR / financials
 - PAT growth
-- ROE
+- RoNW / ROE
 - ROCE
-- Debt/Equity
-- Pre-IPO P/E
-- Automatic Investment Quality Score
-- Overall Score = 45% Listing Gain + 55% Investment Quality
+- Debt / Equity
+- P/E
+- Lot size and other issue details
 
-The financial highlights are taken from InvestorGain IPO detail pages, which publish restated financial/KPI data derived from IPO RHP/DRHP disclosures.
+The backend now stores that detail URL and fetches the same company's fundamentals from it.
 
-If the detail page cannot be found or parsed reliably, Investment Quality remains `Pending` rather than being fabricated.
-
-## Valuation
-The current valuation sub-score is based on an absolute pre-IPO P/E heuristic. It is deliberately conservative and is not a full peer-relative valuation.
+InvestorGain remains only a fallback.
 
 ## Upload to GitHub
-Replace:
+Replace only:
 - `api/ipos.js`
-- `src/main.jsx`
-- `src/styles.css`
 
-No API key is required.
+Keep your current `src/main.jsx` and `src/styles.css`.
+
+Then redeploy Vercel.
+
+Test:
+https://ipo-scout-india.vercel.app/api/ipos
+
+Look for:
+`"fundamentals":{"verified":true,...}`
